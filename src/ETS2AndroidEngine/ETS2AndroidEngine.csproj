@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="TruckLib.HashFs" Version="0.2.7" />
-    <PackageReference Include="TruckLib.Models" Version="0.4.2" />
+    <PackageReference Include="TruckLib.Models" Version="0.4.3" />
   </ItemGroup>
 
 </Project>
