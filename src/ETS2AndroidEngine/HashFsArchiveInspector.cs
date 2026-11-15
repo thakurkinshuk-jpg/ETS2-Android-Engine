@@ -101,22 +101,11 @@ public static class HashFsArchiveInspector
         {
             var trucks = reader.GetDirectoryListing("/vehicle/truck");
 
-            result.AppendLine("TRUCK SUBDIRECTORIES:");
-
             foreach (var folder in trucks.Subdirectories.Take(50))
                 result.AppendLine("[DIR] " + folder);
 
-            result.AppendLine();
-            result.AppendLine("TRUCK FILES:");
-
             foreach (var file in trucks.Files.Take(50))
                 result.AppendLine("[FILE] " + file);
-
-            result.AppendLine();
-            result.AppendLine(
-                $"Truck subdirectories: {trucks.Subdirectories.Count}");
-            result.AppendLine(
-                $"Truck files: {trucks.Files.Count}");
         }
         catch (Exception ex)
         {
@@ -124,9 +113,38 @@ public static class HashFsArchiveInspector
             result.AppendLine(ex.Message);
         }
 
+        result.AppendLine();
+        result.AppendLine("DAF XF ASSETS:");
+
+        try
+        {
+            var daf = reader.GetDirectoryListing(
+                "/vehicle/truck/daf_xf");
+
+            result.AppendLine("DAF XF SUBDIRECTORIES:");
+
+            foreach (var folder in daf.Subdirectories.Take(100))
+                result.AppendLine("[DIR] " + folder);
+
+            result.AppendLine();
+            result.AppendLine("DAF XF FILES:");
+
+            foreach (var file in daf.Files.Take(100))
+                result.AppendLine("[FILE] " + file);
+
+            result.AppendLine();
+            result.AppendLine(
+                $"DAF XF subdirectories: {daf.Subdirectories.Count}");
+
+            result.AppendLine(
+                $"DAF XF files: {daf.Files.Count}");
+        }
+        catch (Exception ex)
+        {
+            result.AppendLine("DAF XF listing failed:");
+            result.AppendLine(ex.Message);
+        }
+
         return result.ToString();
     }
 }
-
-
-
