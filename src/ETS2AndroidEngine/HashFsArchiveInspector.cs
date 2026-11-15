@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using TruckLib.HashFs;
+using TruckLib.Models;
 
 namespace ETS2AndroidEngine;
 
@@ -39,16 +40,88 @@ public static class HashFsArchiveInspector
         result.AppendLine();
         result.AppendLine("DAF XF MODEL FILE HEADERS:");
 
-        InspectHeader(reader.Extract("/vehicle/truck/daf_xf/truck.pmd"),
-            result, "truck.pmd");
+        var pmdFiles =
+            reader.Extract("/vehicle/truck/daf_xf/truck.pmd");
 
-        InspectHeader(reader.Extract("/vehicle/truck/daf_xf/truck.pmg"),
-            result, "truck.pmg");
+        var pmgFiles =
+            reader.Extract("/vehicle/truck/daf_xf/truck.pmg");
 
-        InspectHeader(reader.Extract("/vehicle/truck/daf_xf/truck.pmc"),
-            result, "truck.pmc");
+        var pmcFiles =
+            reader.Extract("/vehicle/truck/daf_xf/truck.pmc");
+
+        InspectHeader(pmdFiles, result, "truck.pmd");
+        InspectHeader(pmgFiles, result, "truck.pmg");
+        InspectHeader(pmcFiles, result, "truck.pmc");
+
+        TryDecodeDafModel(pmdFiles, pmgFiles, result);
 
         return result.ToString();
+    }
+
+    private static void TryDecodeDafModel(
+        byte[][] pmdFiles,
+        byte[][] pmgFiles,
+        StringBuilder result)
+    {
+        result.AppendLine();
+        result.AppendLine("DAF XF MODEL DECODE TEST:");
+
+        try
+        {
+            if (pmdFiles.Length == 0 || pmgFiles.Length == 0)
+            {
+                result.AppendLine("PMD or PMG file is missing.");
+                return;
+            }
+
+            // Keep the original archive data unchanged.
+            // This is only an experimental parser compatibility test.
+            var compatiblePmg = (byte[])pmgFiles[0].Clone();
+
+            var detectedVersion = compatiblePmg[0];
+
+            result.AppendLine(
+                $"Original PMG version byte: {detectedVersion}");
+
+            if (detectedVersion == 20)
+            {
+                compatiblePmg[0] = 21;
+                result.AppendLine(
+                    "Experimental PMG version adjustment applied in memory.");
+            }
+
+            var model = Model.Load(
+                pmdFiles[0],
+                compatiblePmg);
+
+            int partCount = model.Parts.Count;
+
+            int pieceCount = model.Parts.Sum(
+                part => part.Pieces.Count);
+
+            int vertexCount = model.Parts.Sum(
+                part => part.Pieces.Sum(
+                    piece => piece.Vertices.Count));
+
+            int triangleCount = model.Parts.Sum(
+                part => part.Pieces.Sum(
+                    piece => piece.Triangles.Count));
+
+            result.AppendLine("Model parser completed.");
+            result.AppendLine($"Parts: {partCount}");
+            result.AppendLine($"Pieces: {pieceCount}");
+            result.AppendLine($"Vertices: {vertexCount}");
+            result.AppendLine($"Triangles: {triangleCount}");
+
+            result.AppendLine(
+                "NOTE: Version-20 compatibility is experimental. Geometry requires validation.");
+        }
+        catch (Exception ex)
+        {
+            result.AppendLine("Model decoding failed.");
+            result.AppendLine(
+                ex.GetType().Name + ": " + ex.Message);
+        }
     }
 
     private static void InspectHeader(
@@ -85,7 +158,8 @@ public static class HashFsArchiveInspector
         }
         catch (Exception ex)
         {
-            result.AppendLine("Inspection failed: " + ex.Message);
+            result.AppendLine(
+                "Inspection failed: " + ex.Message);
         }
     }
 }
