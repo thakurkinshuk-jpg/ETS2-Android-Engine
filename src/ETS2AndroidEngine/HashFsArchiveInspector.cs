@@ -3,7 +3,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using TruckLib.HashFs;
-using TruckLib.Models;
 
 namespace ETS2AndroidEngine;
 
@@ -53,75 +52,82 @@ public static class HashFsArchiveInspector
         InspectHeader(pmgFiles, result, "truck.pmg");
         InspectHeader(pmcFiles, result, "truck.pmc");
 
-        TryDecodeDafModel(pmdFiles, pmgFiles, result);
+        InspectPmg20Header(pmgFiles, result);
 
         return result.ToString();
     }
 
-    private static void TryDecodeDafModel(
-        byte[][] pmdFiles,
-        byte[][] pmgFiles,
+    private static void InspectPmg20Header(
+        byte[][] files,
         StringBuilder result)
     {
         result.AppendLine();
-        result.AppendLine("DAF XF MODEL DECODE TEST:");
+        result.AppendLine("PMG VERSION 20 STRUCTURE:");
 
-        try
+        if (files.Length == 0 || files[0].Length < 116)
         {
-            if (pmdFiles.Length == 0 || pmgFiles.Length == 0)
-            {
-                result.AppendLine("PMD or PMG file is missing.");
-                return;
-            }
+            result.AppendLine(
+                "PMG file is missing or header is incomplete.");
+            return;
+        }
 
-            // Keep the original archive data unchanged.
-            // This is only an experimental parser compatibility test.
-            var compatiblePmg = (byte[])pmgFiles[0].Clone();
+        byte[] data = files[0];
 
-            var detectedVersion = compatiblePmg[0];
+        uint U(int offset) =>
+            BitConverter.ToUInt32(data, offset);
+
+        float F(int offset) =>
+            BitConverter.ToSingle(data, offset);
+
+        result.AppendLine($"Magic: 0x{U(0):X8}");
+        result.AppendLine($"Pieces: {U(4)}");
+        result.AppendLine($"Parts: {U(8)}");
+        result.AppendLine($"Bones: {U(12)}");
+        result.AppendLine($"Locators: {U(16)}");
+
+        result.AppendLine();
+        result.AppendLine("DATA OFFSETS AND SIZES:");
+
+        string[] names =
+        {
+            "Skeleton",
+            "Parts",
+            "Locators",
+            "Pieces",
+            "String pool",
+            "Skin pool",
+            "Dynamic pool",
+            "Static pool",
+            "Index pool"
+        };
+
+        int[] offsets =
+        {
+            60, 64, 68, 72, 76, 84, 92, 100, 108
+        };
+
+        for (int i = 0; i < names.Length; i++)
+        {
+            uint offset = U(offsets[i]);
+            uint size = i < 4 ? 0 : U(offsets[i] + 4);
 
             result.AppendLine(
-                $"Original PMG version byte: {detectedVersion}");
+                $"{names[i]}: Offset={offset}, Size={size}");
 
-            if (detectedVersion == 20)
+            if (i >= 4)
             {
-                compatiblePmg[0] = 21;
+                ulong end = (ulong)offset + size;
+
                 result.AppendLine(
-                    "Experimental PMG version adjustment applied in memory.");
+                    end <= (ulong)data.Length
+                        ? "  Range: Within file"
+                        : "  Range: EXCEEDS FILE SIZE");
             }
-
-            var model = Model.Load(
-                pmdFiles[0],
-                compatiblePmg);
-
-            int partCount = model.Parts.Count;
-
-            int pieceCount = model.Parts.Sum(
-                part => part.Pieces.Count);
-
-            int vertexCount = model.Parts.Sum(
-                part => part.Pieces.Sum(
-                    piece => piece.Vertices.Count));
-
-            int triangleCount = model.Parts.Sum(
-                part => part.Pieces.Sum(
-                    piece => piece.Triangles.Count));
-
-            result.AppendLine("Model parser completed.");
-            result.AppendLine($"Parts: {partCount}");
-            result.AppendLine($"Pieces: {pieceCount}");
-            result.AppendLine($"Vertices: {vertexCount}");
-            result.AppendLine($"Triangles: {triangleCount}");
-
-            result.AppendLine(
-                "NOTE: Version-20 compatibility is experimental. Geometry requires validation.");
         }
-        catch (Exception ex)
-        {
-            result.AppendLine("Model decoding failed.");
-            result.AppendLine(
-                ex.GetType().Name + ": " + ex.Message);
-        }
+
+        result.AppendLine();
+        result.AppendLine($"PMG file size: {data.Length}");
+        result.AppendLine($"Bounding radius: {F(32)}");
     }
 
     private static void InspectHeader(
