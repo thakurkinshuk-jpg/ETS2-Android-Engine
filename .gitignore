@@ -1,0 +1,27 @@
+
+# Build output
+bin/
+obj/
+build/
+.gradle/
+
+# IDE files
+.vs/
+.idea/
+*.user
+*.suo
+
+# Android build files
+*.apk
+*.aab
+*.dex
+
+# Local configuration and secrets
+local.properties
+*.keystore
+*.jks
+secrets.json
+
+# Temporary files
+*.log
+.DS_Store
