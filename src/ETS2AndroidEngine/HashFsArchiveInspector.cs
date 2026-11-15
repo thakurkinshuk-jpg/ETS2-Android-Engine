@@ -83,8 +83,10 @@ public static class HashFsArchiveInspector
                 result.AppendLine("[FILE] " + file);
 
             result.AppendLine();
-            result.AppendLine($"Vehicle subdirectories: {vehicles.Subdirectories.Count}");
-            result.AppendLine($"Vehicle files: {vehicles.Files.Count}");
+            result.AppendLine(
+                $"Vehicle subdirectories: {vehicles.Subdirectories.Count}");
+            result.AppendLine(
+                $"Vehicle files: {vehicles.Files.Count}");
         }
         catch (Exception ex)
         {
@@ -92,8 +94,39 @@ public static class HashFsArchiveInspector
             result.AppendLine(ex.Message);
         }
 
+        result.AppendLine();
+        result.AppendLine("TRUCK ASSETS:");
+
+        try
+        {
+            var trucks = reader.GetDirectoryListing("/vehicle/truck");
+
+            result.AppendLine("TRUCK SUBDIRECTORIES:");
+
+            foreach (var folder in trucks.Subdirectories.Take(50))
+                result.AppendLine("[DIR] " + folder);
+
+            result.AppendLine();
+            result.AppendLine("TRUCK FILES:");
+
+            foreach (var file in trucks.Files.Take(50))
+                result.AppendLine("[FILE] " + file);
+
+            result.AppendLine();
+            result.AppendLine(
+                $"Truck subdirectories: {trucks.Subdirectories.Count}");
+            result.AppendLine(
+                $"Truck files: {trucks.Files.Count}");
+        }
+        catch (Exception ex)
+        {
+            result.AppendLine("Truck listing failed:");
+            result.AppendLine(ex.Message);
+        }
+
         return result.ToString();
     }
 }
+
 
 
