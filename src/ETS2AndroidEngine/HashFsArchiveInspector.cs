@@ -14,10 +14,29 @@ public static class HashFsArchiveInspector
 
         var result = new StringBuilder();
 
-        result.AppendLine("ETS2 HASHFS ARCHIVE REPORT");
-        result.AppendLine("==========================");
+        result.AppendLine("ETS2 ARCHIVE REPORT");
+        result.AppendLine("-------------------");
         result.AppendLine($"HashFS Version: {reader.Version}");
-        result.AppendLine($"Indexed entries: {reader.Entries.Count}");
+        result.AppendLine($"Total indexed entries: {reader.Entries.Count}");
+        result.AppendLine();
+
+        try
+        {
+            var versionData = reader.Extract("/version.txt");
+
+            if (versionData.Length > 0)
+            {
+                result.AppendLine("GAME VERSION FILE:");
+                result.AppendLine(
+                    Encoding.UTF8.GetString(versionData[0]).Trim());
+            }
+        }
+        catch (Exception ex)
+        {
+            result.AppendLine("Could not read version.txt:");
+            result.AppendLine(ex.Message);
+        }
+
         result.AppendLine();
 
         try
@@ -36,11 +55,8 @@ public static class HashFsArchiveInspector
                 result.AppendLine("[FILE] " + file);
 
             result.AppendLine();
-            result.AppendLine(
-                $"Directories: {listing.Subdirectories.Count}");
-
-            result.AppendLine(
-                $"Files: {listing.Files.Count}");
+            result.AppendLine($"Directories: {listing.Subdirectories.Count}");
+            result.AppendLine($"Files: {listing.Files.Count}");
         }
         catch (Exception ex)
         {
@@ -51,4 +67,5 @@ public static class HashFsArchiveInspector
         return result.ToString();
     }
 }
+
 
