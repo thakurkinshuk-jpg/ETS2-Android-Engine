@@ -39,30 +39,28 @@ public static class HashFsArchiveInspector
         result.AppendLine();
         result.AppendLine("DAF XF MODEL FILE HEADERS:");
 
-        InspectHeader(reader, result,
-            "/vehicle/truck/daf_xf/truck.pmd");
+        InspectHeader(reader.Extract("/vehicle/truck/daf_xf/truck.pmd"),
+            result, "truck.pmd");
 
-        InspectHeader(reader, result,
-            "/vehicle/truck/daf_xf/truck.pmg");
+        InspectHeader(reader.Extract("/vehicle/truck/daf_xf/truck.pmg"),
+            result, "truck.pmg");
 
-        InspectHeader(reader, result,
-            "/vehicle/truck/daf_xf/truck.pmc");
+        InspectHeader(reader.Extract("/vehicle/truck/daf_xf/truck.pmc"),
+            result, "truck.pmc");
 
         return result.ToString();
     }
 
     private static void InspectHeader(
-        HashFsReader reader,
+        byte[][] files,
         StringBuilder result,
-        string path)
+        string fileName)
     {
         result.AppendLine();
-        result.AppendLine(path);
+        result.AppendLine(fileName);
 
         try
         {
-            var files = reader.Extract(path);
-
             if (files.Length == 0)
             {
                 result.AppendLine("No data returned.");
@@ -87,7 +85,7 @@ public static class HashFsArchiveInspector
         }
         catch (Exception ex)
         {
-            result.AppendLine("Extraction failed: " + ex.Message);
+            result.AppendLine("Inspection failed: " + ex.Message);
         }
     }
 }
