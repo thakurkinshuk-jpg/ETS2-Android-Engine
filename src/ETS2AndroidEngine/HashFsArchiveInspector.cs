@@ -64,6 +64,34 @@ public static class HashFsArchiveInspector
             result.AppendLine(ex.Message);
         }
 
+        result.AppendLine();
+        result.AppendLine("VEHICLE ASSETS:");
+
+        try
+        {
+            var vehicles = reader.GetDirectoryListing("/vehicle");
+
+            result.AppendLine("VEHICLE SUBDIRECTORIES:");
+
+            foreach (var folder in vehicles.Subdirectories.Take(40))
+                result.AppendLine("[DIR] " + folder);
+
+            result.AppendLine();
+            result.AppendLine("VEHICLE FILES:");
+
+            foreach (var file in vehicles.Files.Take(40))
+                result.AppendLine("[FILE] " + file);
+
+            result.AppendLine();
+            result.AppendLine($"Vehicle subdirectories: {vehicles.Subdirectories.Count}");
+            result.AppendLine($"Vehicle files: {vehicles.Files.Count}");
+        }
+        catch (Exception ex)
+        {
+            result.AppendLine("Vehicle listing failed:");
+            result.AppendLine(ex.Message);
+        }
+
         return result.ToString();
     }
 }
