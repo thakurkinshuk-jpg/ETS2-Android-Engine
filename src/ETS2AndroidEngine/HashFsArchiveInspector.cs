@@ -33,118 +33,61 @@ public static class HashFsArchiveInspector
         }
         catch (Exception ex)
         {
-            result.AppendLine("Could not read version.txt:");
-            result.AppendLine(ex.Message);
+            result.AppendLine("Version read failed: " + ex.Message);
         }
 
         result.AppendLine();
+        result.AppendLine("DAF XF MODEL FILE HEADERS:");
 
-        try
-        {
-            var listing = reader.GetDirectoryListing("/");
+        InspectHeader(reader, result,
+            "/vehicle/truck/daf_xf/truck.pmd");
 
-            result.AppendLine("ROOT DIRECTORIES:");
+        InspectHeader(reader, result,
+            "/vehicle/truck/daf_xf/truck.pmg");
 
-            foreach (var folder in listing.Subdirectories.Take(30))
-                result.AppendLine("[DIR] " + folder);
-
-            result.AppendLine();
-            result.AppendLine("ROOT FILES:");
-
-            foreach (var file in listing.Files.Take(30))
-                result.AppendLine("[FILE] " + file);
-
-            result.AppendLine();
-            result.AppendLine($"Directories: {listing.Subdirectories.Count}");
-            result.AppendLine($"Files: {listing.Files.Count}");
-        }
-        catch (Exception ex)
-        {
-            result.AppendLine("Root directory listing unavailable.");
-            result.AppendLine(ex.Message);
-        }
-
-        result.AppendLine();
-        result.AppendLine("VEHICLE ASSETS:");
-
-        try
-        {
-            var vehicles = reader.GetDirectoryListing("/vehicle");
-
-            result.AppendLine("VEHICLE SUBDIRECTORIES:");
-
-            foreach (var folder in vehicles.Subdirectories.Take(40))
-                result.AppendLine("[DIR] " + folder);
-
-            result.AppendLine();
-            result.AppendLine("VEHICLE FILES:");
-
-            foreach (var file in vehicles.Files.Take(40))
-                result.AppendLine("[FILE] " + file);
-
-            result.AppendLine();
-            result.AppendLine(
-                $"Vehicle subdirectories: {vehicles.Subdirectories.Count}");
-            result.AppendLine(
-                $"Vehicle files: {vehicles.Files.Count}");
-        }
-        catch (Exception ex)
-        {
-            result.AppendLine("Vehicle listing failed:");
-            result.AppendLine(ex.Message);
-        }
-
-        result.AppendLine();
-        result.AppendLine("TRUCK ASSETS:");
-
-        try
-        {
-            var trucks = reader.GetDirectoryListing("/vehicle/truck");
-
-            foreach (var folder in trucks.Subdirectories.Take(50))
-                result.AppendLine("[DIR] " + folder);
-
-            foreach (var file in trucks.Files.Take(50))
-                result.AppendLine("[FILE] " + file);
-        }
-        catch (Exception ex)
-        {
-            result.AppendLine("Truck listing failed:");
-            result.AppendLine(ex.Message);
-        }
-
-        result.AppendLine();
-        result.AppendLine("DAF XF ASSETS:");
-
-        try
-        {
-            var daf = reader.GetDirectoryListing(
-                "/vehicle/truck/daf_xf");
-
-            result.AppendLine("DAF XF SUBDIRECTORIES:");
-
-            foreach (var folder in daf.Subdirectories.Take(100))
-                result.AppendLine("[DIR] " + folder);
-
-            result.AppendLine();
-            result.AppendLine("DAF XF FILES:");
-
-            foreach (var file in daf.Files.Take(100))
-                result.AppendLine("[FILE] " + file);
-
-            result.AppendLine();
-            result.AppendLine(
-                $"DAF XF subdirectories: {daf.Subdirectories.Count}");
-
-            result.AppendLine(
-                $"DAF XF files: {daf.Files.Count}");
-        }
-        catch (Exception ex)
-        {
-            result.AppendLine("DAF XF listing failed:");
-            result.AppendLine(ex.Message);
-        }
+        InspectHeader(reader, result,
+            "/vehicle/truck/daf_xf/truck.pmc");
 
         return result.ToString();
+    }
+
+    private static void InspectHeader(
+        HashFsReader reader,
+        StringBuilder result,
+        string path)
+    {
+        result.AppendLine();
+        result.AppendLine(path);
+
+        try
+        {
+            var files = reader.Extract(path);
+
+            if (files.Length == 0)
+            {
+                result.AppendLine("No data returned.");
+                return;
+            }
+
+            var data = files[0];
+
+            result.AppendLine($"File size: {data.Length} bytes");
+
+            result.AppendLine(
+                "First 32 bytes (HEX): " +
+                Convert.ToHexString(data.Take(32).ToArray()));
+
+            result.AppendLine(
+                "First 32 bytes (TEXT): " +
+                new string(data.Take(32)
+                    .Select(b => b >= 32 && b <= 126
+                        ? (char)b
+                        : '.')
+                    .ToArray()));
+        }
+        catch (Exception ex)
+        {
+            result.AppendLine("Extraction failed: " + ex.Message);
+        }
     }
 }
