@@ -34,7 +34,6 @@ namespace ETS2AndroidEngine
 
         public Vector3 Position { get; set; }
         public Vector3 Normal { get; set; }
-
         public Vector4? Tangent { get; set; }
 
         public Vector2[] TextureCoordinates { get; set; }
@@ -42,7 +41,6 @@ namespace ETS2AndroidEngine
 
         public byte[]? Color { get; set; }
         public byte[]? Factor { get; set; }
-
         public byte[]? BoneIndices { get; set; }
         public byte[]? BoneWeights { get; set; }
     }
@@ -60,7 +58,6 @@ namespace ETS2AndroidEngine
                 throw new InvalidOperationException(
                     "PMG file is smaller than its 104-byte header.");
 
-            // Version and signature: 14 67 6D 50
             if (data[0] != 0x14 ||
                 data[1] != (byte)'g' ||
                 data[2] != (byte)'m' ||
@@ -98,7 +95,6 @@ namespace ETS2AndroidEngine
                     "PMG header contains invalid counts.");
             }
 
-            // Validate the major sections before reading them.
             CheckSection(data, skeletonOffset, boneCount, 200, "skeleton");
             CheckSection(data, partsOffset, partCount, 24, "parts");
             CheckSection(data, locatorsOffset, locatorCount, 44, "locators");
@@ -144,11 +140,12 @@ namespace ETS2AndroidEngine
                     throw new InvalidOperationException(
                         $"Piece {i} has an unsupported texture coordinate width.");
 
-                if ((boneIndexOffset == -1) != (boneWeightOffset == -1))
-                    throw new InvalidOperationException(
-                        $"Piece {i} has incomplete bone data.");
+                // Bone data is optional. Both streams must exist
+                // before they are included in the vertex layout.
+                bool hasBoneData =
+                    boneIndexOffset != -1 &&
+                    boneWeightOffset != -1;
 
-                // Calculate the interleaved vertex-record stride.
                 int stride = 0;
 
                 if (positionOffset != -1) stride += 12;
@@ -161,14 +158,13 @@ namespace ETS2AndroidEngine
                 if (colorOffset != -1) stride += 4;
                 if (factorOffset != -1) stride += 4;
 
-                if (boneIndexOffset != -1)
+                if (hasBoneData)
                     stride += 8;
 
                 if (verts > 0 && stride == 0)
                     throw new InvalidOperationException(
                         $"Piece {i} has vertices but no vertex attributes.");
 
-                // Verify each attribute stream stays inside the vertex pool.
                 CheckVertexAttribute(positionOffset, 12, verts, stride,
                     vertexPoolOffset, vertexPoolSize, "position");
 
@@ -187,11 +183,14 @@ namespace ETS2AndroidEngine
                 CheckVertexAttribute(factorOffset, 4, verts, stride,
                     vertexPoolOffset, vertexPoolSize, "factor");
 
-                CheckVertexAttribute(boneIndexOffset, 4, verts, stride,
-                    vertexPoolOffset, vertexPoolSize, "bone indices");
+                if (hasBoneData)
+                {
+                    CheckVertexAttribute(boneIndexOffset, 4, verts, stride,
+                        vertexPoolOffset, vertexPoolSize, "bone indices");
 
-                CheckVertexAttribute(boneWeightOffset, 4, verts, stride,
-                    vertexPoolOffset, vertexPoolSize, "bone weights");
+                    CheckVertexAttribute(boneWeightOffset, 4, verts, stride,
+                        vertexPoolOffset, vertexPoolSize, "bone weights");
+                }
 
                 int triangleCount = edges / 3;
                 int indexBytes = checked(triangleCount * 6);
@@ -236,7 +235,6 @@ namespace ETS2AndroidEngine
                     if (tangentOffset != -1)
                     {
                         int o = tangentOffset + record;
-
                         vertex.Tangent = new Vector4(
                             F32(data, o),
                             F32(data, o + 4),
@@ -251,7 +249,6 @@ namespace ETS2AndroidEngine
                         for (int t = 0; t < texCoordWidth; t++)
                         {
                             int o = texCoordOffset + record + t * 8;
-
                             coordinates[t] = new Vector2(
                                 F32(data, o),
                                 F32(data, o + 4));
@@ -266,7 +263,7 @@ namespace ETS2AndroidEngine
                     if (factorOffset != -1)
                         vertex.Factor = Bytes(data, factorOffset + record, 4);
 
-                    if (boneIndexOffset != -1)
+                    if (hasBoneData)
                     {
                         vertex.BoneIndices =
                             Bytes(data, boneIndexOffset + record, 4);
@@ -315,20 +312,17 @@ namespace ETS2AndroidEngine
 
         private static int I32(byte[] d, int o)
         {
-            return BinaryPrimitives.ReadInt32LittleEndian(
-                d.AsSpan(o, 4));
+            return BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(o, 4));
         }
 
         private static uint U32(byte[] d, int o)
         {
-            return BinaryPrimitives.ReadUInt32LittleEndian(
-                d.AsSpan(o, 4));
+            return BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(o, 4));
         }
 
         private static ushort U16(byte[] d, int o)
         {
-            return BinaryPrimitives.ReadUInt16LittleEndian(
-                d.AsSpan(o, 2));
+            return BinaryPrimitives.ReadUInt16LittleEndian(d.AsSpan(o, 2));
         }
 
         private static float F32(byte[] d, int o)
@@ -407,4 +401,3 @@ namespace ETS2AndroidEngine
         }
     }
 }
-
