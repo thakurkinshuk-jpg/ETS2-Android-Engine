@@ -30,11 +30,18 @@ public sealed class DafXfRenderer :
         uniform vec4 uColor;
         uniform sampler2D uTexture;
         uniform float uUseTexture;
+        uniform float uIsGlass;
 
         varying vec2 vTexCoord;
 
         void main()
         {
+            if (uIsGlass > 0.5)
+            {
+                gl_FragColor = vec4(0.62, 0.78, 0.84, 0.22);
+                return;
+            }
+
             vec4 texColor = texture2D(uTexture, vTexCoord);
 
             gl_FragColor = mix(
@@ -60,6 +67,7 @@ public sealed class DafXfRenderer :
     private int _colorHandle;
     private int _textureHandle;
     private int _useTextureHandle;
+    private int _glassHandle;
 
     private int _colorGlTexture;
     private int _glassGlTexture;
@@ -230,6 +238,10 @@ public sealed class DafXfRenderer :
             GLES20.GlGetUniformLocation(
                 _program, "uUseTexture");
 
+        _glassHandle =
+            GLES20.GlGetUniformLocation(
+                _program, "uIsGlass");
+
         BuildBuffers();
 
         _colorGlTexture = UploadTexture(_colorTexture);
@@ -248,7 +260,7 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Shadow-only and fake-shadow materials.
+            // Exclude shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -519,6 +531,10 @@ public sealed class DafXfRenderer :
             GLES20.GlUniform1f(
                 _useTextureHandle,
                 piece.HasTextureCoordinates ? 1f : 0f);
+
+            GLES20.GlUniform1f(
+                _glassHandle,
+                isGlass ? 1f : 0f);
 
             if (isGlass)
             {
