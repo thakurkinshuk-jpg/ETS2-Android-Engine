@@ -14,21 +14,21 @@ public static class HashFsArchiveInspector
 
         var result = new StringBuilder();
 
-        result.AppendLine("ETS2 PMD MODEL ANALYSIS");
-        result.AppendLine("-----------------------");
+        result.AppendLine("ETS2 MATERIAL INSPECTION");
+        result.AppendLine("------------------------");
         result.AppendLine($"HashFS Version: {reader.Version}");
         result.AppendLine($"Total entries: {reader.Entries.Count}");
         result.AppendLine();
 
         try
         {
-            var versionData = reader.Extract("/version.txt");
+            var version = reader.Extract("/version.txt");
 
-            if (versionData.Length > 0)
+            if (version.Length > 0)
             {
                 result.AppendLine("GAME VERSION:");
                 result.AppendLine(
-                    Encoding.UTF8.GetString(versionData[0]).Trim());
+                    Encoding.UTF8.GetString(version[0]).Trim());
             }
         }
         catch (Exception ex)
@@ -45,65 +45,65 @@ public static class HashFsArchiveInspector
             return result.ToString();
         }
 
-        byte[] data = pmdFiles[0];
+        byte[] pmd = pmdFiles[0];
 
         result.AppendLine();
-        result.AppendLine("DAF XF TRUCK.PMD");
-        result.AppendLine("----------------");
-        result.AppendLine($"File size: {data.Length} bytes");
+        result.AppendLine("PMD FILE:");
+        result.AppendLine($"Size: {pmd.Length} bytes");
+        result.AppendLine(
+            $"First 32-bit value: {BitConverter.ToUInt32(pmd, 0)}");
+
+        string pmdText = Encoding.Latin1.GetString(pmd);
+
+        var materialPaths = pmdText
+            .Split('\0')
+            .Where(s => s.StartsWith(
+                "/automat/",
+                StringComparison.Ordinal))
+            .Where(s => s.EndsWith(
+                ".mat",
+                StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
         result.AppendLine();
+        result.AppendLine(
+            $"MATERIAL REFERENCES FOUND: {materialPaths.Length}");
 
-        result.AppendLine("COMPLETE PMD HEX DUMP:");
-
-        for (int row = 0; row < data.Length; row += 16)
+        foreach (string path in materialPaths)
         {
-            int count = Math.Min(16, data.Length - row);
+            result.AppendLine();
+            result.AppendLine("================================");
+            result.AppendLine("MATERIAL: " + path);
+            result.AppendLine("================================");
 
-            var hex = new StringBuilder();
-            var ascii = new StringBuilder();
-
-            for (int i = row; i < row + count; i++)
+            try
             {
-                hex.Append(data[i].ToString("X2"));
-                hex.Append(' ');
+                var files = reader.Extract(path);
 
-                byte value = data[i];
+                if (files.Length == 0)
+                {
+                    result.AppendLine("File not found in archive.");
+                    continue;
+                }
 
-                ascii.Append(
-                    value >= 32 && value <= 126
-                        ? (char)value
-                        : '.');
+                string content =
+                    Encoding.UTF8.GetString(files[0]);
+
+                result.AppendLine(
+                    $"File size: {files[0].Length} bytes");
+
+                result.AppendLine(content);
             }
-
-            result.AppendLine(
-                $"0x{row:X4}: {hex} | {ascii}");
+            catch (Exception ex)
+            {
+                result.AppendLine(
+                    "Extraction error: " + ex.Message);
+            }
         }
 
         result.AppendLine();
-        result.AppendLine("PRINTABLE STRINGS:");
-
-        var current = new StringBuilder();
-
-        foreach (byte value in data)
-        {
-            if (value >= 32 && value <= 126)
-            {
-                current.Append((char)value);
-            }
-            else
-            {
-                if (current.Length >= 4)
-                    result.AppendLine(current.ToString());
-
-                current.Clear();
-            }
-        }
-
-        if (current.Length >= 4)
-            result.AppendLine(current.ToString());
-
-        result.AppendLine();
-        result.AppendLine("PMD ANALYSIS COMPLETED.");
+        result.AppendLine("MATERIAL INSPECTION COMPLETED.");
 
         return result.ToString();
     }
