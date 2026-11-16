@@ -36,12 +36,12 @@ public sealed class DafXfRenderer :
         void main()
         {
             vec4 texColor = texture2D(uTexture, vTexCoord);
-            vec4 finalColor = mix(uColor, texColor, uUseTexture);
-            gl_FragColor = finalColor;
+            gl_FragColor = mix(uColor, texColor * uColor, uUseTexture);
         }";
 
     private readonly PmgV20Model _model;
-    private readonly DecodedDdsTexture _texture;
+    private readonly DecodedDdsTexture _colorTexture;
+    private readonly DecodedDdsTexture _glassTexture;
     private readonly List<PieceBuffer> _buffers = new();
 
     private int _program;
@@ -51,7 +51,9 @@ public sealed class DafXfRenderer :
     private int _colorHandle;
     private int _textureHandle;
     private int _useTextureHandle;
-    private int _glTexture;
+
+    private int _colorGlTexture;
+    private int _glassGlTexture;
 
     private readonly float[] _projection = new float[16];
     private readonly float[] _view = new float[16];
@@ -78,13 +80,17 @@ public sealed class DafXfRenderer :
 
     public DafXfRenderer(
         PmgV20Model model,
-        DecodedDdsTexture texture)
+        DecodedDdsTexture colorTexture,
+        DecodedDdsTexture glassTexture)
     {
         _model = model ??
             throw new ArgumentNullException(nameof(model));
 
-        _texture = texture ??
-            throw new ArgumentNullException(nameof(texture));
+        _colorTexture = colorTexture ??
+            throw new ArgumentNullException(nameof(colorTexture));
+
+        _glassTexture = glassTexture ??
+            throw new ArgumentNullException(nameof(glassTexture));
 
         CalculateModelBounds();
     }
@@ -171,7 +177,9 @@ public sealed class DafXfRenderer :
                 _program, "uUseTexture");
 
         BuildBuffers();
-        UploadTexture();
+
+        _colorGlTexture = UploadTexture(_colorTexture);
+        _glassGlTexture = UploadTexture(_glassTexture);
     }
 
     private void BuildBuffers()
@@ -184,7 +192,8 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Skip shadow-only and fake-shadow materials.
+            // Shadow-only and fake-shadow surfaces
+            // are not normal visible truck surfaces.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -206,9 +215,7 @@ public sealed class DafXfRenderer :
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
 
-                // Use UV0 for the base texture.
-                // UV1 and UV2 remain available for future
-                // material-specific shader support.
+                // UV0 is used for the base texture.
                 if (vertex.TextureCoordinates.Length > 0)
                 {
                     var uv = vertex.TextureCoordinates[0];
@@ -267,23 +274,24 @@ public sealed class DafXfRenderer :
         }
     }
 
-    private void UploadTexture()
+    private static int UploadTexture(
+        DecodedDdsTexture texture)
     {
         var pixels = ByteBuffer
-            .AllocateDirect(_texture.Rgba.Length);
+            .AllocateDirect(texture.Rgba.Length);
 
-        pixels.Put(_texture.Rgba);
+        pixels.Put(texture.Rgba);
         pixels.Position(0);
 
         var textureIds = new int[1];
 
         GLES20.GlGenTextures(1, textureIds, 0);
 
-        _glTexture = textureIds[0];
+        int textureId = textureIds[0];
 
         GLES20.GlBindTexture(
             GLES20.GlTexture2d,
-            _glTexture);
+            textureId);
 
         GLES20.GlPixelStorei(
             GLES20.GlUnpackAlignment,
@@ -299,7 +307,6 @@ public sealed class DafXfRenderer :
             GLES20.GlTextureMagFilter,
             GLES20.GlLinear);
 
-        // Repeat texture coordinates outside the 0-1 range.
         GLES20.GlTexParameteri(
             GLES20.GlTexture2d,
             GLES20.GlTextureWrapS,
@@ -314,8 +321,8 @@ public sealed class DafXfRenderer :
             GLES20.GlTexture2d,
             0,
             GLES20.GlRgba,
-            _texture.Width,
-            _texture.Height,
+            texture.Width,
+            texture.Height,
             0,
             GLES20.GlRgba,
             GLES20.GlUnsignedByte,
@@ -324,6 +331,8 @@ public sealed class DafXfRenderer :
         GLES20.GlBindTexture(
             GLES20.GlTexture2d,
             0);
+
+        return textureId;
     }
 
     public void OnSurfaceChanged(
@@ -404,13 +413,6 @@ public sealed class DafXfRenderer :
             _mvp,
             0);
 
-        GLES20.GlActiveTexture(
-            GLES20.GlTexture0);
-
-        GLES20.GlBindTexture(
-            GLES20.GlTexture2d,
-            _glTexture);
-
         GLES20.GlUniform1i(
             _textureHandle,
             0);
@@ -443,27 +445,29 @@ public sealed class DafXfRenderer :
                 0,
                 piece.TexCoords);
 
-            bool useTexture =
-                piece.HasTextureCoordinates &&
-                piece.MaterialIndex != 8;
+            bool isGlass = piece.MaterialIndex == 8;
 
-            if (piece.MaterialIndex == 8)
-            {
-                // Temporary glass tint.
-                GLES20.GlUniform4f(
-                    _colorHandle,
-                    0.55f, 0.78f, 0.72f, 1f);
-            }
-            else
-            {
-                GLES20.GlUniform4f(
-                    _colorHandle,
-                    0.72f, 0.74f, 0.77f, 1f);
-            }
+            int selectedTexture = isGlass
+                ? _glassGlTexture
+                : _colorGlTexture;
+
+            GLES20.GlActiveTexture(
+                GLES20.GlTexture0);
+
+            GLES20.GlBindTexture(
+                GLES20.GlTexture2d,
+                selectedTexture);
+
+            GLES20.GlUniform4f(
+                _colorHandle,
+                isGlass ? 0.8752f : 0.72f,
+                isGlass ? 0.966216f : 0.74f,
+                isGlass ? 0.924392f : 0.77f,
+                1f);
 
             GLES20.GlUniform1f(
                 _useTextureHandle,
-                useTexture ? 1f : 0f);
+                piece.HasTextureCoordinates ? 1f : 0f);
 
             GLES20.GlDrawElements(
                 GLES20.GlTriangles,
