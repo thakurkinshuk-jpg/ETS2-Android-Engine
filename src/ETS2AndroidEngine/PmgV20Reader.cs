@@ -195,6 +195,18 @@ namespace ETS2AndroidEngine
 
                 if (indexBytes > 0)
                 {
+                    if (triangleOffset == -1)
+                    {
+                        throw new InvalidOperationException(
+                            $"PMG index offset is -1. " +
+                            $"Piece={i}, RecordOffset={p}, " +
+                            $"Edges={edges}, Vertices={verts}, " +
+                            $"PiecesOffset={piecesOffset}, " +
+                            $"IndexPoolOffset={indexPoolOffset}, " +
+                            $"IndexPoolSize={indexPoolSize}, " +
+                            $"RawPiece={Convert.ToHexString(data.AsSpan(p, PieceSize))}");
+                    }
+
                     CheckPoolRange(
                         triangleOffset, indexBytes,
                         indexPoolOffset, indexPoolSize, "triangle indices");
