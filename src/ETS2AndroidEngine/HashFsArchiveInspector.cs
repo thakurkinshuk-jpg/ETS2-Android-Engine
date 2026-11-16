@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Buffers.Binary;
 using TruckLib.HashFs;
 
 namespace ETS2AndroidEngine;
@@ -52,82 +53,79 @@ public static class HashFsArchiveInspector
         InspectHeader(pmgFiles, result, "truck.pmg");
         InspectHeader(pmcFiles, result, "truck.pmc");
 
-        InspectPmg20Header(pmgFiles, result);
+        InspectPmgRawHeader(pmgFiles, result);
 
         return result.ToString();
     }
 
-    private static void InspectPmg20Header(
+    private static void InspectPmgRawHeader(
         byte[][] files,
         StringBuilder result)
     {
         result.AppendLine();
-        result.AppendLine("PMG VERSION 20 STRUCTURE:");
+        result.AppendLine("PMG VERSION 20 RAW HEADER:");
+        result.AppendLine("--------------------------");
 
-        if (files.Length == 0 || files[0].Length < 116)
+        if (files.Length == 0 || files[0].Length < 4)
         {
-            result.AppendLine(
-                "PMG file is missing or header is incomplete.");
+            result.AppendLine("PMG file is missing or incomplete.");
             return;
         }
 
         byte[] data = files[0];
 
-        uint U(int offset) =>
-            BitConverter.ToUInt32(data, offset);
-
-        float F(int offset) =>
-            BitConverter.ToSingle(data, offset);
-
-        result.AppendLine($"Magic: 0x{U(0):X8}");
-        result.AppendLine($"Pieces: {U(4)}");
-        result.AppendLine($"Parts: {U(8)}");
-        result.AppendLine($"Bones: {U(12)}");
-        result.AppendLine($"Locators: {U(16)}");
-
+        result.AppendLine($"PMG version byte: {data[0]}");
+        result.AppendLine($"Total PMG size: {data.Length} bytes");
+        result.AppendLine("Showing first 256 bytes.");
+        result.AppendLine(
+            "Each row contains raw HEX, ASCII and little-endian 32-bit words.");
         result.AppendLine();
-        result.AppendLine("DATA OFFSETS AND SIZES:");
 
-        string[] names =
-        {
-            "Skeleton",
-            "Parts",
-            "Locators",
-            "Pieces",
-            "String pool",
-            "Skin pool",
-            "Dynamic pool",
-            "Static pool",
-            "Index pool"
-        };
+        int length = Math.Min(256, data.Length);
 
-        int[] offsets =
+        for (int row = 0; row < length; row += 16)
         {
-            60, 64, 68, 72, 76, 84, 92, 100, 108
-        };
+            int count = Math.Min(16, length - row);
 
-        for (int i = 0; i < names.Length; i++)
-        {
-            uint offset = U(offsets[i]);
-            uint size = i < 4 ? 0 : U(offsets[i] + 4);
+            var hex = new StringBuilder();
+            var ascii = new StringBuilder();
+            var words = new StringBuilder();
+
+            for (int i = row; i < row + count; i++)
+            {
+                hex.Append(data[i].ToString("X2"));
+                hex.Append(' ');
+
+                byte value = data[i];
+
+                ascii.Append(
+                    value >= 32 && value <= 126
+                        ? (char)value
+                        : '.');
+            }
+
+            for (int i = row; i + 4 <= row + count; i += 4)
+            {
+                uint value =
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        data.AsSpan(i, 4));
+
+                words.Append($"0x{value:X8} ");
+            }
 
             result.AppendLine(
-                $"{names[i]}: Offset={offset}, Size={size}");
+                $"Offset 0x{row:X4}: {hex}");
 
-            if (i >= 4)
-            {
-                ulong end = (ulong)offset + size;
+            result.AppendLine(
+                $"  ASCII: {ascii}");
 
-                result.AppendLine(
-                    end <= (ulong)data.Length
-                        ? "  Range: Within file"
-                        : "  Range: EXCEEDS FILE SIZE");
-            }
+            result.AppendLine(
+                $"  WORDS: {words}");
+
+            result.AppendLine();
         }
 
-        result.AppendLine();
-        result.AppendLine($"PMG file size: {data.Length}");
-        result.AppendLine($"Bounding radius: {F(32)}");
+        result.AppendLine("RAW HEADER DUMP COMPLETED.");
     }
 
     private static void InspectHeader(
