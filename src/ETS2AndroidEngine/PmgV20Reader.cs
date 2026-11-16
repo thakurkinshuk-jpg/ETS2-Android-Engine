@@ -140,8 +140,6 @@ namespace ETS2AndroidEngine
                     throw new InvalidOperationException(
                         $"Piece {i} has an unsupported texture coordinate width.");
 
-                // Bone data is optional. Both streams must exist
-                // before they are included in the vertex layout.
                 bool hasBoneData =
                     boneIndexOffset != -1 &&
                     boneWeightOffset != -1;
