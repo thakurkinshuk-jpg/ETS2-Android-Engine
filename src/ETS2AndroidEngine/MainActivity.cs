@@ -2,7 +2,6 @@ using Android.App;
 using Android.Content;
 using Android.Opengl;
 using Android.OS;
-using Android.Views;
 using Android.Widget;
 using System;
 using System.IO;
@@ -36,7 +35,7 @@ public class MainActivity : Activity
 
         var title = new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nDAF XF 3D MODEL",
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF TEXTURE TEST",
             TextSize = 22
         };
 
@@ -84,11 +83,11 @@ public class MainActivity : Activity
         var uri = data.Data;
 
         _selectButton.Enabled = false;
-        _status.Text = "Loading DAF XF model...\nPlease wait.";
+        _status.Text = "Loading DAF XF model and texture...\nPlease wait.";
 
         try
         {
-            PmgV20Model model = await Task.Run(() =>
+            var loaded = await Task.Run(() =>
             {
                 using var input =
                     ContentResolver!.OpenInputStream(uri)
@@ -96,19 +95,30 @@ public class MainActivity : Activity
 
                 using var reader = HashFsReader.Open(input);
 
-                var files = reader.Extract(
+                var modelFiles = reader.Extract(
                     "/vehicle/truck/daf_xf/truck.pmg");
 
-                if (files.Length == 0)
+                if (modelFiles.Length == 0)
                     throw new FileNotFoundException(
                         "DAF XF truck.pmg was not found.");
 
-                return PmgV20Reader.Read(files[0]);
+                var textureFiles = reader.Extract(
+                    "/vehicle/truck/daf_xf/color.dds");
+
+                if (textureFiles.Length == 0)
+                    throw new FileNotFoundException(
+                        "DAF XF color.dds was not found.");
+
+                var model = PmgV20Reader.Read(modelFiles[0]);
+                var texture = DdsTextureDecoder.Decode(textureFiles[0]);
+
+                return (Model: model, Texture: texture);
             });
 
             _glView = new GLSurfaceView(this);
             _glView.SetEGLContextClientVersion(2);
-            _glView.SetRenderer(new DafXfRenderer(model));
+            _glView.SetRenderer(
+                new DafXfRenderer(loaded.Model, loaded.Texture));
             _glView.RenderMode = Rendermode.Continuously;
 
             SetContentView(_glView);
@@ -116,7 +126,7 @@ public class MainActivity : Activity
         catch (Exception ex)
         {
             _status.Text =
-                "MODEL LOADING FAILED\n\n" +
+                "MODEL OR TEXTURE LOADING FAILED\n\n" +
                 ex.GetType().Name + "\n" +
                 ex.Message;
 
