@@ -11,10 +11,7 @@ using TruckLib.HashFs;
 
 namespace ETS2AndroidEngine;
 
-[Activity(
-    Label = "ETS2 Android Engine",
-    MainLauncher = true,
-    Exported = true)]
+[Activity(Label = "ETS2 Android Engine", MainLauncher = true, Exported = true)]
 public class MainActivity : Activity
 {
     private const int PickArchiveRequest = 1001;
@@ -25,9 +22,11 @@ public class MainActivity : Activity
     private Button _renderButton = null!;
     private Button _copyButton = null!;
 
-    private PmgV20Model? _loadedModel;
-    private DecodedDdsTexture? _colorTexture;
-    private DecodedDdsTexture? _glassTexture;
+    private PmgV20Model? _model;
+    private DecodedDdsTexture? _color;
+    private DecodedDdsTexture? _glass;
+    private DecodedDdsTexture? _lightmask;
+    private DecodedDdsTexture? _environment;
 
     private GLSurfaceView? _glView;
     private string _diagnosticReport = "";
@@ -43,11 +42,11 @@ public class MainActivity : Activity
 
         layout.SetPadding(20, 20, 20, 20);
 
-        var title = new TextView(this)
+        layout.AddView(new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nDAF XF TEXTURE RENDERER",
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL RENDERER",
             TextSize = 21
-        };
+        });
 
         _selectButton = new Button(this)
         {
@@ -85,7 +84,6 @@ public class MainActivity : Activity
         _renderButton.Click += (_, _) => ShowTruck();
         _copyButton.Click += (_, _) => CopyReport();
 
-        layout.AddView(title);
         layout.AddView(_selectButton);
         layout.AddView(_renderButton);
         layout.AddView(_copyButton);
@@ -122,7 +120,7 @@ public class MainActivity : Activity
         _renderButton.Enabled = false;
         _copyButton.Enabled = false;
 
-        _status.Text = "Loading DAF XF model and textures...";
+        _status.Text = "Loading DAF XF model and four textures...";
         _report.Text = "";
 
         try
@@ -131,123 +129,109 @@ public class MainActivity : Activity
             {
                 using var input =
                     ContentResolver!.OpenInputStream(uri)
-                    ?? throw new IOException(
-                        "Cannot open the selected archive.");
+                    ?? throw new IOException("Cannot open archive.");
 
                 using var reader = HashFsReader.Open(input);
 
-                // Load the DAF XF model.
-                var modelFiles = reader.Extract(
-                    "/vehicle/truck/daf_xf/truck.pmg");
+                byte[] Extract(string path)
+                {
+                    var files = reader.Extract(path);
 
-                if (modelFiles.Length == 0)
-                    throw new FileNotFoundException(
-                        "truck.pmg was not found.");
+                    if (files.Length == 0)
+                        throw new FileNotFoundException(
+                            "Asset not found: " + path);
 
-                var model = PmgV20Reader.Read(modelFiles[0]);
+                    return files[0];
+                }
 
-                // Load the main truck texture.
-                var colorFiles = reader.Extract(
-                    "/vehicle/truck/daf_xf/color.dds");
+                var model = PmgV20Reader.Read(
+                    Extract("/vehicle/truck/daf_xf/truck.pmg"));
 
-                if (colorFiles.Length == 0)
-                    throw new FileNotFoundException(
-                        "color.dds was not found.");
+                var color = DdsTextureDecoder.Decode(
+                    Extract("/vehicle/truck/daf_xf/color.dds"));
 
-                var colorTexture =
-                    DdsTextureDecoder.Decode(colorFiles[0]);
+                var glass = DdsTextureDecoder.Decode(
+                    Extract("/vehicle/truck/share/glass_ex.dds"));
 
-                // Load the separate glass texture.
-                var glassFiles = reader.Extract(
-                    "/vehicle/truck/share/glass_ex.dds");
+                var lightmask = DdsTextureDecoder.Decode(
+                    Extract("/vehicle/truck/daf_xf/lightmask.dds"));
 
-                if (glassFiles.Length == 0)
-                    throw new FileNotFoundException(
-                        "glass_ex.dds was not found.");
+                var environment = DdsTextureDecoder.Decode(
+                    Extract("/material/environment/generic_s.dds"));
 
-                var glassTexture =
-                    DdsTextureDecoder.Decode(glassFiles[0]);
-
-                // Build a concise diagnostic report.
                 var report = new StringBuilder();
 
-                report.AppendLine("ETS2 DAF XF MODEL REPORT");
-                report.AppendLine("------------------------");
-                report.AppendLine(
-                    $"Model pieces: {model.PieceCount}");
-                report.AppendLine(
-                    $"Model parts: {model.PartCount}");
-                report.AppendLine(
-                    $"Model bones: {model.BoneCount}");
+                report.AppendLine("ETS2 DAF XF MATERIAL REPORT");
+                report.AppendLine("---------------------------");
+                report.AppendLine($"Pieces: {model.PieceCount}");
+                report.AppendLine($"Parts: {model.PartCount}");
+                report.AppendLine($"Bones: {model.BoneCount}");
 
                 report.AppendLine();
-                report.AppendLine("COLOR TEXTURE");
-                report.AppendLine(
-                    $"Size: {colorTexture.Width} x {colorTexture.Height}");
-                report.AppendLine(
-                    $"RGBA bytes: {colorTexture.Rgba.Length}");
+                report.AppendLine($"COLOR: {color.Width} x {color.Height}");
+                report.AppendLine($"GLASS: {glass.Width} x {glass.Height}");
+                report.AppendLine($"LIGHTMASK: {lightmask.Width} x {lightmask.Height}");
+                report.AppendLine($"ENVIRONMENT: {environment.Width} x {environment.Height}");
 
                 report.AppendLine();
-                report.AppendLine("GLASS TEXTURE");
-                report.AppendLine(
-                    $"Size: {glassTexture.Width} x {glassTexture.Height}");
-                report.AppendLine(
-                    $"RGBA bytes: {glassTexture.Rgba.Length}");
+                report.AppendLine("MATERIAL COUNTS");
 
-                report.AppendLine();
-                report.AppendLine("MATERIAL SUMMARY");
-
-                for (int i = 0; i < model.Pieces.Count; i++)
+                for (int material = 0; material <= 9; material++)
                 {
-                    var piece = model.Pieces[i];
+                    int count = 0;
+
+                    foreach (var piece in model.Pieces)
+                    {
+                        if (piece.MaterialIndex == material)
+                            count++;
+                    }
 
                     report.AppendLine(
-                        $"Piece {piece.Index}: " +
-                        $"Vertices {piece.VertexCount}, " +
-                        $"Triangles {piece.Indices.Length / 3}, " +
-                        $"Material {piece.MaterialIndex}, " +
-                        $"UV channels {piece.TexCoordWidth}");
+                        $"Material {material}: {count} pieces");
                 }
 
                 report.AppendLine();
-                report.AppendLine("TEXTURE LOADING COMPLETED.");
+                report.AppendLine("FOUR TEXTURES DECODED SUCCESSFULLY.");
 
                 return (
                     Model: model,
-                    Color: colorTexture,
-                    Glass: glassTexture,
+                    Color: color,
+                    Glass: glass,
+                    Lightmask: lightmask,
+                    Environment: environment,
                     Report: report.ToString()
                 );
             });
 
-            _loadedModel = loaded.Model;
-            _colorTexture = loaded.Color;
-            _glassTexture = loaded.Glass;
+            _model = loaded.Model;
+            _color = loaded.Color;
+            _glass = loaded.Glass;
+            _lightmask = loaded.Lightmask;
+            _environment = loaded.Environment;
 
             _diagnosticReport = loaded.Report;
             _report.Text = _diagnosticReport;
 
-            _status.Text =
-                "MODEL AND BOTH TEXTURES LOADED SUCCESSFULLY";
+            _status.Text = "MODEL AND FOUR TEXTURES LOADED";
 
             _renderButton.Enabled = true;
             _copyButton.Enabled = true;
-            _selectButton.Enabled = true;
         }
         catch (Exception ex)
         {
-            _status.Text =
-                "LOADING FAILED\n" + ex.Message;
-
+            _status.Text = "LOADING FAILED\n" + ex.Message;
+        }
+        finally
+        {
             _selectButton.Enabled = true;
         }
     }
 
     private void ShowTruck()
     {
-        if (_loadedModel == null ||
-            _colorTexture == null ||
-            _glassTexture == null)
+        if (_model == null || _color == null ||
+            _glass == null || _lightmask == null ||
+            _environment == null)
         {
             Toast.MakeText(
                 this,
@@ -258,16 +242,14 @@ public class MainActivity : Activity
         }
 
         _glView = new GLSurfaceView(this);
-
         _glView.SetEGLContextClientVersion(2);
 
-        // IMPORTANT:
-        // Pass model, colour texture and glass texture.
-        _glView.SetRenderer(
-            new DafXfRenderer(
-                _loadedModel,
-                _colorTexture,
-                _glassTexture));
+        _glView.SetRenderer(new DafXfRenderer(
+            _model,
+            _color,
+            _glass,
+            _lightmask,
+            _environment));
 
         _glView.RenderMode = Rendermode.Continuously;
 
