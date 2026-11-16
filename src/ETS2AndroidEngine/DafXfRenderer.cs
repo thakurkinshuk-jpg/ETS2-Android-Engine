@@ -7,7 +7,8 @@ using EGLConfig = Javax.Microedition.Khronos.Egl.EGLConfig;
 
 namespace ETS2AndroidEngine;
 
-public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
+public sealed class DafXfRenderer :
+    Java.Lang.Object, GLSurfaceView.IRenderer
 {
     private const string VertexShader = @"
         attribute vec3 aPosition;
@@ -17,7 +18,8 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
         varying vec2 vTexCoord;
 
-        void main() {
+        void main()
+        {
             gl_Position = uMvp * vec4(aPosition, 1.0);
             vTexCoord = aTexCoord;
         }";
@@ -31,13 +33,17 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
         varying vec2 vTexCoord;
 
-        void main() {
+        void main()
+        {
             vec4 texColor = texture2D(uTexture, vTexCoord);
-            gl_FragColor = mix(uColor, texColor, uUseTexture);
+            vec4 finalColor = mix(uColor, texColor, uUseTexture);
+
+            gl_FragColor = finalColor;
         }";
 
     private readonly PmgV20Model _model;
     private readonly DecodedDdsTexture _texture;
+
     private readonly List<PieceBuffer> _buffers = new();
 
     private int _program;
@@ -66,7 +72,9 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         public FloatBuffer Vertices = null!;
         public FloatBuffer TexCoords = null!;
         public ShortBuffer Indices = null!;
+
         public int IndexCount;
+        public int MaterialIndex;
         public bool HasTextureCoordinates;
     }
 
@@ -74,8 +82,11 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         PmgV20Model model,
         DecodedDdsTexture texture)
     {
-        _model = model ?? throw new ArgumentNullException(nameof(model));
-        _texture = texture ?? throw new ArgumentNullException(nameof(texture));
+        _model = model ??
+            throw new ArgumentNullException(nameof(model));
+
+        _texture = texture ??
+            throw new ArgumentNullException(nameof(texture));
 
         CalculateModelBounds();
     }
@@ -110,7 +121,8 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         }
 
         if (minX == float.MaxValue)
-            throw new InvalidOperationException("Model has no positions.");
+            throw new InvalidOperationException(
+                "Model has no positions.");
 
         _centerX = (minX + maxX) * 0.5f;
         _centerY = (minY + maxY) * 0.5f;
@@ -123,30 +135,42 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         _scale = largest > 0 ? 2f / largest : 1f;
     }
 
-    public void OnSurfaceCreated(IGL10? gl, EGLConfig? config)
+    public void OnSurfaceCreated(
+        IGL10? gl,
+        EGLConfig? config)
     {
-        GLES20.GlClearColor(0.08f, 0.09f, 0.12f, 1f);
+        GLES20.GlClearColor(
+            0.08f, 0.09f, 0.12f, 1f);
+
         GLES20.GlEnable(GLES20.GlDepthTest);
 
-        _program = CreateProgram(VertexShader, FragmentShader);
+        _program = CreateProgram(
+            VertexShader,
+            FragmentShader);
 
-        _positionHandle = GLES20.GlGetAttribLocation(
-            _program, "aPosition");
+        _positionHandle =
+            GLES20.GlGetAttribLocation(
+                _program, "aPosition");
 
-        _texCoordHandle = GLES20.GlGetAttribLocation(
-            _program, "aTexCoord");
+        _texCoordHandle =
+            GLES20.GlGetAttribLocation(
+                _program, "aTexCoord");
 
-        _mvpHandle = GLES20.GlGetUniformLocation(
-            _program, "uMvp");
+        _mvpHandle =
+            GLES20.GlGetUniformLocation(
+                _program, "uMvp");
 
-        _colorHandle = GLES20.GlGetUniformLocation(
-            _program, "uColor");
+        _colorHandle =
+            GLES20.GlGetUniformLocation(
+                _program, "uColor");
 
-        _textureHandle = GLES20.GlGetUniformLocation(
-            _program, "uTexture");
+        _textureHandle =
+            GLES20.GlGetUniformLocation(
+                _program, "uTexture");
 
-        _useTextureHandle = GLES20.GlGetUniformLocation(
-            _program, "uUseTexture");
+        _useTextureHandle =
+            GLES20.GlGetUniformLocation(
+                _program, "uUseTexture");
 
         BuildBuffers();
         UploadTexture();
@@ -162,20 +186,34 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
                 piece.Indices.Length == 0)
                 continue;
 
-            var positions = new float[piece.Vertices.Length * 3];
-            var texCoords = new float[piece.Vertices.Length * 2];
+            // Material 1: shadow-only.
+            // Material 5: fake shadow.
+            // These are not ordinary visible truck surfaces.
+            if (piece.MaterialIndex == 1 ||
+                piece.MaterialIndex == 5)
+                continue;
+
+            var positions =
+                new float[piece.Vertices.Length * 3];
+
+            var texCoords =
+                new float[piece.Vertices.Length * 2];
 
             bool hasUv = piece.TexCoordWidth > 0;
 
             for (int i = 0; i < piece.Vertices.Length; i++)
             {
                 var vertex = piece.Vertices[i];
+
                 var p = vertex.Position;
 
                 positions[i * 3] = p.X;
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
 
+                // UV0 is the base texture coordinate.
+                // Additional UV channels are retained in the
+                // parsed model for later shader implementation.
                 if (vertex.TextureCoordinates.Length > 0)
                 {
                     var uv = vertex.TextureCoordinates[0];
@@ -189,10 +227,14 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
                 }
             }
 
-            var indexData = new short[piece.Indices.Length];
+            var indexData =
+                new short[piece.Indices.Length];
 
             for (int i = 0; i < piece.Indices.Length; i++)
-                indexData[i] = unchecked((short)piece.Indices[i]);
+            {
+                indexData[i] =
+                    unchecked((short)piece.Indices[i]);
+            }
 
             var vertexBuffer = ByteBuffer
                 .AllocateDirect(positions.Length * 4)
@@ -224,6 +266,7 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
                 TexCoords = uvBuffer,
                 Indices = indexBuffer,
                 IndexCount = indexData.Length,
+                MaterialIndex = piece.MaterialIndex,
                 HasTextureCoordinates = hasUv
             });
         }
@@ -240,13 +283,16 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         var textureIds = new int[1];
 
         GLES20.GlGenTextures(1, textureIds, 0);
+
         _glTexture = textureIds[0];
 
         GLES20.GlBindTexture(
-            GLES20.GlTexture2d, _glTexture);
+            GLES20.GlTexture2d,
+            _glTexture);
 
         GLES20.GlPixelStorei(
-            GLES20.GlUnpackAlignment, 1);
+            GLES20.GlUnpackAlignment,
+            1);
 
         GLES20.GlTexParameteri(
             GLES20.GlTexture2d,
@@ -279,7 +325,9 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
             GLES20.GlUnsignedByte,
             pixels);
 
-        GLES20.GlBindTexture(GLES20.GlTexture2d, 0);
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d,
+            0);
     }
 
     public void OnSurfaceChanged(
@@ -290,14 +338,20 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         if (height <= 0)
             height = 1;
 
-        GLES20.GlViewport(0, 0, width, height);
+        GLES20.GlViewport(
+            0, 0, width, height);
 
         Matrix.PerspectiveM(
-            _projection, 0, 45f,
-            (float)width / height, 0.1f, 100f);
+            _projection,
+            0,
+            45f,
+            (float)width / height,
+            0.1f,
+            100f);
 
         Matrix.SetLookAtM(
-            _view, 0,
+            _view,
+            0,
             0f, 0f, 4.2f,
             0f, -0.15f, 0f,
             0f, 1f, 0f);
@@ -314,43 +368,62 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
         _rotation += 0.35f;
 
-        Matrix.SetIdentityM(_modelMatrix, 0);
+        Matrix.SetIdentityM(
+            _modelMatrix, 0);
 
         Matrix.RotateM(
-            _modelMatrix, 0,
-            _rotation, 0f, 1f, 0f);
+            _modelMatrix,
+            0,
+            _rotation,
+            0f, 1f, 0f);
 
         Matrix.ScaleM(
-            _modelMatrix, 0,
+            _modelMatrix,
+            0,
             _scale, _scale, _scale);
 
         Matrix.TranslateM(
-            _modelMatrix, 0,
-            -_centerX, -_centerY, -_centerZ);
+            _modelMatrix,
+            0,
+            -_centerX,
+            -_centerY,
+            -_centerZ);
 
         Matrix.MultiplyMM(
-            _mv, 0, _view, 0, _modelMatrix, 0);
+            _mv, 0,
+            _view, 0,
+            _modelMatrix, 0);
 
         Matrix.MultiplyMM(
-            _mvp, 0, _projection, 0, _mv, 0);
+            _mvp, 0,
+            _projection, 0,
+            _mv, 0);
 
         GLES20.GlUseProgram(_program);
 
         GLES20.GlUniformMatrix4fv(
-            _mvpHandle, 1, false, _mvp, 0);
+            _mvpHandle,
+            1,
+            false,
+            _mvp,
+            0);
 
-        GLES20.GlUniform4f(
-            _colorHandle, 0.65f, 0.68f, 0.72f, 1f);
-
-        GLES20.GlActiveTexture(GLES20.GlTexture0);
+        GLES20.GlActiveTexture(
+            GLES20.GlTexture0);
 
         GLES20.GlBindTexture(
-            GLES20.GlTexture2d, _glTexture);
+            GLES20.GlTexture2d,
+            _glTexture);
 
-        GLES20.GlUniform1i(_textureHandle, 0);
+        GLES20.GlUniform1i(
+            _textureHandle,
+            0);
 
-        GLES20.GlEnableVertexAttribArray(_positionHandle);
-        GLES20.GlEnableVertexAttribArray(_texCoordHandle);
+        GLES20.GlEnableVertexAttribArray(
+            _positionHandle);
+
+        GLES20.GlEnableVertexAttribArray(
+            _texCoordHandle);
 
         foreach (var piece in _buffers)
         {
@@ -374,9 +447,29 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
                 0,
                 piece.TexCoords);
 
+            bool useTexture =
+                piece.HasTextureCoordinates &&
+                piece.MaterialIndex != 8;
+
+            // Glass gets a temporary tinted appearance.
+            // Its real glass_ex texture and reflection shader
+            // will be added in a later rendering step.
+            if (piece.MaterialIndex == 8)
+            {
+                GLES20.GlUniform4f(
+                    _colorHandle,
+                    0.55f, 0.78f, 0.72f, 1f);
+            }
+            else
+            {
+                GLES20.GlUniform4f(
+                    _colorHandle,
+                    0.72f, 0.74f, 0.77f, 1f);
+            }
+
             GLES20.GlUniform1f(
                 _useTextureHandle,
-                piece.HasTextureCoordinates ? 1f : 0f);
+                useTexture ? 1f : 0f);
 
             GLES20.GlDrawElements(
                 GLES20.GlTriangles,
@@ -385,10 +478,15 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
                 piece.Indices);
         }
 
-        GLES20.GlDisableVertexAttribArray(_positionHandle);
-        GLES20.GlDisableVertexAttribArray(_texCoordHandle);
+        GLES20.GlDisableVertexAttribArray(
+            _positionHandle);
 
-        GLES20.GlBindTexture(GLES20.GlTexture2d, 0);
+        GLES20.GlDisableVertexAttribArray(
+            _texCoordHandle);
+
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d,
+            0);
     }
 
     private static int CreateProgram(
@@ -396,25 +494,32 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         string fragmentSource)
     {
         int vertex = CompileShader(
-            GLES20.GlVertexShader, vertexSource);
+            GLES20.GlVertexShader,
+            vertexSource);
 
         int fragment = CompileShader(
-            GLES20.GlFragmentShader, fragmentSource);
+            GLES20.GlFragmentShader,
+            fragmentSource);
 
         int program = GLES20.GlCreateProgram();
 
         GLES20.GlAttachShader(program, vertex);
         GLES20.GlAttachShader(program, fragment);
+
         GLES20.GlLinkProgram(program);
 
         var status = new int[1];
 
         GLES20.GlGetProgramiv(
-            program, GLES20.GlLinkStatus, status, 0);
+            program,
+            GLES20.GlLinkStatus,
+            status,
+            0);
 
         if (status[0] == 0)
         {
-            string error = GLES20.GlGetProgramInfoLog(program);
+            string error =
+                GLES20.GlGetProgramInfoLog(program);
 
             throw new InvalidOperationException(
                 "OpenGL program link failed: " + error);
@@ -438,11 +543,15 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         var status = new int[1];
 
         GLES20.GlGetShaderiv(
-            shader, GLES20.GlCompileStatus, status, 0);
+            shader,
+            GLES20.GlCompileStatus,
+            status,
+            0);
 
         if (status[0] == 0)
         {
-            string error = GLES20.GlGetShaderInfoLog(shader);
+            string error =
+                GLES20.GlGetShaderInfoLog(shader);
 
             throw new InvalidOperationException(
                 "OpenGL shader compilation failed: " + error);
