@@ -1,80 +1,37 @@
 using System;
-using System.IO;
 using System.Linq;
 using System.Text;
+using System.Collections.Generic;
 using TruckLib.HashFs;
 
 namespace ETS2AndroidEngine;
 
 public static class HashFsArchiveInspector
 {
+    private static readonly string[] TobjPaths =
+    {
+        "/vehicle/truck/daf_xf/color.tobj",
+        "/material/environment/vehicle_reflection.tobj",
+        "/vehicle/truck/daf_xf/lightmask.tobj",
+        "/vehicle/truck/share/glass_ex.tobj"
+    };
+
     public static string Inspect(Stream archiveStream)
     {
         using var reader = HashFsReader.Open(archiveStream);
 
         var result = new StringBuilder();
 
-        result.AppendLine("ETS2 MATERIAL INSPECTION");
-        result.AppendLine("------------------------");
+        result.AppendLine("ETS2 TOBJ INSPECTION");
+        result.AppendLine("-------------------");
         result.AppendLine($"HashFS Version: {reader.Version}");
         result.AppendLine($"Total entries: {reader.Entries.Count}");
-        result.AppendLine();
 
-        try
-        {
-            var version = reader.Extract("/version.txt");
-
-            if (version.Length > 0)
-            {
-                result.AppendLine("GAME VERSION:");
-                result.AppendLine(
-                    Encoding.UTF8.GetString(version[0]).Trim());
-            }
-        }
-        catch (Exception ex)
-        {
-            result.AppendLine("Version error: " + ex.Message);
-        }
-
-        var pmdFiles =
-            reader.Extract("/vehicle/truck/daf_xf/truck.pmd");
-
-        if (pmdFiles.Length == 0)
-        {
-            result.AppendLine("ERROR: truck.pmd not found.");
-            return result.ToString();
-        }
-
-        byte[] pmd = pmdFiles[0];
-
-        result.AppendLine();
-        result.AppendLine("PMD FILE:");
-        result.AppendLine($"Size: {pmd.Length} bytes");
-        result.AppendLine(
-            $"First 32-bit value: {BitConverter.ToUInt32(pmd, 0)}");
-
-        string pmdText = Encoding.Latin1.GetString(pmd);
-
-        var materialPaths = pmdText
-            .Split('\0')
-            .Where(s => s.StartsWith(
-                "/automat/",
-                StringComparison.Ordinal))
-            .Where(s => s.EndsWith(
-                ".mat",
-                StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        result.AppendLine();
-        result.AppendLine(
-            $"MATERIAL REFERENCES FOUND: {materialPaths.Length}");
-
-        foreach (string path in materialPaths)
+        foreach (string path in TobjPaths)
         {
             result.AppendLine();
             result.AppendLine("================================");
-            result.AppendLine("MATERIAL: " + path);
+            result.AppendLine("TOBJ: " + path);
             result.AppendLine("================================");
 
             try
@@ -83,27 +40,74 @@ public static class HashFsArchiveInspector
 
                 if (files.Length == 0)
                 {
-                    result.AppendLine("File not found in archive.");
+                    result.AppendLine("FILE NOT FOUND");
                     continue;
                 }
 
-                string content =
-                    Encoding.UTF8.GetString(files[0]);
+                byte[] data = files[0];
 
-                result.AppendLine(
-                    $"File size: {files[0].Length} bytes");
+                result.AppendLine($"File size: {data.Length} bytes");
 
-                result.AppendLine(content);
+                result.AppendLine();
+                result.AppendLine("HEX DATA (first 128 bytes):");
+
+                int count = Math.Min(data.Length, 128);
+
+                for (int i = 0; i < count; i += 16)
+                {
+                    int length = Math.Min(16, count - i);
+
+                    result.Append($"{i:X4}: ");
+
+                    for (int j = 0; j < length; j++)
+                    {
+                        result.Append(data[i + j].ToString("X2"));
+                        result.Append(' ');
+                    }
+
+                    result.AppendLine();
+                }
+
+                result.AppendLine();
+                result.AppendLine("PRINTABLE STRINGS:");
+
+                string decoded = Encoding.Latin1.GetString(data);
+
+                var strings = new List<string>();
+                var current = new StringBuilder();
+
+                foreach (char c in decoded)
+                {
+                    if (c >= 32 && c <= 126)
+                    {
+                        current.Append(c);
+                    }
+                    else
+                    {
+                        if (current.Length >= 4)
+                            strings.Add(current.ToString());
+
+                        current.Clear();
+                    }
+                }
+
+                if (current.Length >= 4)
+                    strings.Add(current.ToString());
+
+                if (strings.Count == 0)
+                    result.AppendLine("(No printable strings found)");
+                else
+                    foreach (string value in strings.Distinct())
+                        result.AppendLine(value);
             }
             catch (Exception ex)
             {
-                result.AppendLine(
-                    "Extraction error: " + ex.Message);
+                result.AppendLine("ERROR: " + ex.Message);
             }
         }
 
         result.AppendLine();
-        result.AppendLine("MATERIAL INSPECTION COMPLETED.");
+        result.AppendLine("TOBJ INSPECTION COMPLETED.");
 
         return result.ToString();
     }
