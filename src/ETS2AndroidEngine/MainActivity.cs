@@ -29,8 +29,15 @@ public class MainActivity : Activity
         "/automat/84/841f0c93e373bad4.mat",
         "/automat/cf/cf0a056cbdd16884.mat",
         "/automat/da/da4d9d4cbfbf1693.mat",
-        "/automat/3b/3be06047c43a8f77.mat",
+        "/automat/3b/3be06047c43a8a4d.mat",
         "/automat/ec/ecc5854f240fb7d9.mat"
+    };
+
+    private static readonly string[] TobjPaths =
+    {
+        "/vehicle/truck/daf_xf/color.tobj",
+        "/vehicle/truck/daf_xf/lightmask.tobj",
+        "/material/environment/vehicle_reflection.tobj"
     };
 
     private TextView _status = null!;
@@ -57,7 +64,7 @@ public class MainActivity : Activity
 
         var title = new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL INSPECTION",
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF TOBJ INSPECTION",
             TextSize = 21
         };
 
@@ -86,7 +93,7 @@ public class MainActivity : Activity
 
         _report = new TextView(this)
         {
-            Text = "Material diagnostic report will appear here.",
+            Text = "TOBJ diagnostic report will appear here.",
             TextSize = 12
         };
 
@@ -136,7 +143,7 @@ public class MainActivity : Activity
 
         _diagnosticReport = "";
         _report.Text = "";
-        _status.Text = "Inspecting truck and material files...\nPlease wait.";
+        _status.Text = "Inspecting truck, materials and TOBJ files...\nPlease wait.";
 
         try
         {
@@ -153,17 +160,14 @@ public class MainActivity : Activity
                     using var reader = HashFsReader.Open(input);
 
                     stage = "Extracting truck.pmd";
-
                     var pmdFiles = reader.Extract(
                         "/vehicle/truck/daf_xf/truck.pmd");
 
                     stage = "Extracting truck.pmg";
-
                     var pmgFiles = reader.Extract(
                         "/vehicle/truck/daf_xf/truck.pmg");
 
                     stage = "Extracting color.dds";
-
                     var ddsFiles = reader.Extract(
                         "/vehicle/truck/daf_xf/color.dds");
 
@@ -177,15 +181,12 @@ public class MainActivity : Activity
                         throw new FileNotFoundException("color.dds not found.");
 
                     stage = "Parsing DAF XF model";
-
                     var model = PmgV20Reader.Read(pmgFiles[0]);
 
                     stage = "Decoding DAF XF texture";
-
                     var texture = DdsTextureDecoder.Decode(ddsFiles[0]);
 
-                    var materialData =
-                        new byte[]?[MaterialPaths.Length];
+                    var materialData = new byte[]?[MaterialPaths.Length];
 
                     for (int i = 0; i < MaterialPaths.Length; i++)
                     {
@@ -198,16 +199,34 @@ public class MainActivity : Activity
                         }
                         catch (FileNotFoundException)
                         {
-                            // Missing material files are optional.
-                            // Continue inspecting the remaining files.
                             materialData[i] = null;
                         }
                     }
 
-                    stage = "Building material diagnostic report";
+                    var tobjData = new byte[]?[TobjPaths.Length];
+
+                    for (int i = 0; i < TobjPaths.Length; i++)
+                    {
+                        try
+                        {
+                            var files = reader.Extract(TobjPaths[i]);
+
+                            if (files.Length > 0)
+                                tobjData[i] = files[0];
+                        }
+                        catch (FileNotFoundException)
+                        {
+                            tobjData[i] = null;
+                        }
+                    }
+
+                    stage = "Building diagnostic report";
 
                     string materialReport =
                         BuildMaterialReport(materialData);
+
+                    string tobjReport =
+                        BuildTobjReport(tobjData);
 
                     string report = BuildReport(
                         reader.Version.ToString(),
@@ -215,7 +234,8 @@ public class MainActivity : Activity
                         pmdFiles[0],
                         model,
                         texture,
-                        materialReport);
+                        materialReport,
+                        tobjReport);
 
                     return (
                         Model: model,
@@ -238,16 +258,14 @@ public class MainActivity : Activity
             _diagnosticReport = loaded.Report;
 
             _report.Text = _diagnosticReport;
-            _status.Text = "TRUCK AND MATERIAL INSPECTION COMPLETED";
+            _status.Text = "TRUCK, MATERIAL AND TOBJ INSPECTION COMPLETED";
 
             _renderButton.Enabled = true;
             _copyButton.Enabled = true;
         }
         catch (Exception ex)
         {
-            _status.Text =
-                "INSPECTION FAILED\n" + ex.Message;
-
+            _status.Text = "INSPECTION FAILED\n" + ex.Message;
             _selectButton.Enabled = true;
         }
     }
@@ -263,9 +281,7 @@ public class MainActivity : Activity
         for (int i = 0; i < MaterialPaths.Length; i++)
         {
             result.AppendLine();
-            result.AppendLine("----------------------------------------");
             result.AppendLine("FILE: " + MaterialPaths[i]);
-            result.AppendLine("----------------------------------------");
 
             byte[]? data = materialData[i];
 
@@ -278,10 +294,44 @@ public class MainActivity : Activity
             result.AppendLine("STATUS: FOUND");
             result.AppendLine($"SIZE: {data.Length} bytes");
 
-            result.AppendLine();
-            result.AppendLine("FIRST 96 BYTES:");
+            string content = Encoding.UTF8.GetString(data);
+            result.AppendLine("CONTENT:");
+            result.AppendLine(content);
+        }
 
-            int limit = Math.Min(data.Length, 96);
+        return result.ToString();
+    }
+
+    private static string BuildTobjReport(byte[]?[] tobjData)
+    {
+        var result = new StringBuilder();
+
+        result.AppendLine();
+        result.AppendLine("TOBJ FILE INSPECTION");
+        result.AppendLine("====================");
+
+        for (int i = 0; i < TobjPaths.Length; i++)
+        {
+            result.AppendLine();
+            result.AppendLine("----------------------------------------");
+            result.AppendLine("FILE: " + TobjPaths[i]);
+            result.AppendLine("----------------------------------------");
+
+            byte[]? data = tobjData[i];
+
+            if (data == null)
+            {
+                result.AppendLine("STATUS: NOT FOUND");
+                continue;
+            }
+
+            result.AppendLine("STATUS: FOUND");
+            result.AppendLine($"SIZE: {data.Length} bytes");
+
+            result.AppendLine();
+            result.AppendLine("HEX DATA:");
+
+            int limit = Math.Min(data.Length, 256);
 
             for (int j = 0; j < limit; j += 16)
             {
@@ -295,46 +345,35 @@ public class MainActivity : Activity
                 result.AppendLine();
             }
 
+            if (data.Length > limit)
+                result.AppendLine("[HEX DATA TRUNCATED TO FIRST 256 BYTES]");
+
             result.AppendLine();
-            result.AppendLine("READABLE CONTENT:");
+            result.AppendLine("READABLE STRINGS:");
 
-            string decoded = Encoding.UTF8.GetString(data);
+            var current = new StringBuilder();
 
-            var readable = new StringBuilder();
-
-            foreach (char c in decoded)
+            foreach (byte value in data)
             {
-                if (c == '\r' || c == '\n' || c == '\t' ||
-                    !char.IsControl(c))
-                    readable.Append(c);
-            }
-
-            string content = readable.ToString().Trim();
-
-            if (content.Length == 0)
-            {
-                result.AppendLine("(No readable text detected.)");
-            }
-            else
-            {
-                const int maxCharacters = 12000;
-
-                if (content.Length > maxCharacters)
+                if (value >= 32 && value <= 126)
                 {
-                    result.AppendLine(
-                        content.Substring(0, maxCharacters));
-
-                    result.AppendLine("[CONTENT TRUNCATED]");
+                    current.Append((char)value);
                 }
                 else
                 {
-                    result.AppendLine(content);
+                    if (current.Length >= 3)
+                        result.AppendLine(current.ToString());
+
+                    current.Clear();
                 }
             }
+
+            if (current.Length >= 3)
+                result.AppendLine(current.ToString());
         }
 
         result.AppendLine();
-        result.AppendLine("END OF MATERIAL INSPECTION");
+        result.AppendLine("END OF TOBJ INSPECTION");
 
         return result.ToString();
     }
@@ -345,12 +384,13 @@ public class MainActivity : Activity
         byte[] pmd,
         PmgV20Model model,
         DecodedDdsTexture texture,
-        string materialReport)
+        string materialReport,
+        string tobjReport)
     {
         var result = new StringBuilder();
 
-        result.AppendLine("ETS2 DAF XF MATERIAL DIAGNOSTICS");
-        result.AppendLine("--------------------------------");
+        result.AppendLine("ETS2 DAF XF TOBJ DIAGNOSTICS");
+        result.AppendLine("----------------------------");
         result.AppendLine($"HashFS version: {hashVersion}");
         result.AppendLine($"Archive entries: {entryCount}");
 
@@ -406,6 +446,8 @@ public class MainActivity : Activity
         result.AppendLine($"RGBA bytes: {texture.Rgba.Length}");
 
         result.AppendLine(materialReport);
+        result.AppendLine(tobjReport);
+
         result.AppendLine();
         result.AppendLine("END OF DIAGNOSTIC REPORT");
 
@@ -421,7 +463,7 @@ public class MainActivity : Activity
             (ClipboardManager)GetSystemService(ClipboardService)!;
 
         clipboard.PrimaryClip = ClipData.NewPlainText(
-            "ETS2 material diagnostic report",
+            "ETS2 TOBJ diagnostic report",
             _diagnosticReport);
 
         Toast.MakeText(
