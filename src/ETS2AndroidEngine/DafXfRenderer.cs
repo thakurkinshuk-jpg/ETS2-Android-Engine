@@ -36,12 +36,17 @@ public sealed class DafXfRenderer :
         void main()
         {
             vec4 texColor = texture2D(uTexture, vTexCoord);
-            gl_FragColor = mix(uColor, texColor * uColor, uUseTexture);
+            gl_FragColor = mix(
+                uColor,
+                texColor * uColor,
+                uUseTexture
+            );
         }";
 
     private readonly PmgV20Model _model;
     private readonly DecodedDdsTexture _colorTexture;
     private readonly DecodedDdsTexture _glassTexture;
+
     private readonly List<PieceBuffer> _buffers = new();
 
     private int _program;
@@ -209,6 +214,7 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
+            // Shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -472,8 +478,6 @@ public sealed class DafXfRenderer :
                 GLES20.GlTexture2d,
                 selectedTexture);
 
-            // Diagnostic: remove artificial tint.
-            // Display the decoded texture colours unchanged.
             GLES20.GlUniform4f(
                 _colorHandle,
                 1f, 1f, 1f, 1f);
@@ -482,11 +486,29 @@ public sealed class DafXfRenderer :
                 _useTextureHandle,
                 piece.HasTextureCoordinates ? 1f : 0f);
 
+            // Use the DDS alpha channel for glass blending.
+            if (isGlass)
+            {
+                GLES20.GlEnable(GLES20.GlBlend);
+
+                GLES20.GlBlendFunc(
+                    GLES20.GlSrcAlpha,
+                    GLES20.GlOneMinusSrcAlpha);
+
+                GLES20.GlDepthMask(false);
+            }
+
             GLES20.GlDrawElements(
                 GLES20.GlTriangles,
                 piece.IndexCount,
                 GLES20.GlUnsignedShort,
                 piece.Indices);
+
+            if (isGlass)
+            {
+                GLES20.GlDepthMask(true);
+                GLES20.GlDisable(GLES20.GlBlend);
+            }
         }
 
         GLES20.GlDisableVertexAttribArray(
