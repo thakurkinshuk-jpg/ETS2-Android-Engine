@@ -78,6 +78,16 @@ public sealed class DafXfRenderer :
         public bool HasTextureCoordinates;
     }
 
+    // Compatibility constructor:
+    // MainActivity currently calls this two-argument version.
+    public DafXfRenderer(
+        PmgV20Model model,
+        DecodedDdsTexture colorTexture)
+        : this(model, colorTexture, CreateFallbackGlassTexture())
+    {
+    }
+
+    // Full constructor for when glass_ex.dds is loaded separately.
     public DafXfRenderer(
         PmgV20Model model,
         DecodedDdsTexture colorTexture,
@@ -93,6 +103,19 @@ public sealed class DafXfRenderer :
             throw new ArgumentNullException(nameof(glassTexture));
 
         CalculateModelBounds();
+    }
+
+    private static DecodedDdsTexture CreateFallbackGlassTexture()
+    {
+        return new DecodedDdsTexture
+        {
+            Width = 1,
+            Height = 1,
+            Rgba = new byte[]
+            {
+                190, 225, 215, 255
+            }
+        };
     }
 
     private void CalculateModelBounds()
@@ -192,8 +215,7 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Shadow-only and fake-shadow surfaces
-            // are not normal visible truck surfaces.
+            // Exclude shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -215,7 +237,7 @@ public sealed class DafXfRenderer :
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
 
-                // UV0 is used for the base texture.
+                // Use UV0 for the base texture.
                 if (vertex.TextureCoordinates.Length > 0)
                 {
                     var uv = vertex.TextureCoordinates[0];
