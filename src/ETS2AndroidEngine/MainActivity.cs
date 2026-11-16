@@ -229,8 +229,10 @@ public class MainActivity : Activity
 
     private void ShowTruck()
     {
-        if (_model == null || _color == null ||
-            _glass == null || _lightmask == null ||
+        if (_model == null ||
+            _color == null ||
+            _glass == null ||
+            _lightmask == null ||
             _environment == null)
         {
             Toast.MakeText(
@@ -244,11 +246,12 @@ public class MainActivity : Activity
         _glView = new GLSurfaceView(this);
         _glView.SetEGLContextClientVersion(2);
 
-        // IMPORTANT: Current DafXfRenderer accepts three arguments.
         _glView.SetRenderer(new DafXfRenderer(
             _model,
             _color,
-            _glass));
+            _glass,
+            _lightmask,
+            _environment));
 
         _glView.RenderMode = Rendermode.Continuously;
 
