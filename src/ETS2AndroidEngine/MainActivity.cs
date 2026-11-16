@@ -29,7 +29,7 @@ public class MainActivity : Activity
         "/automat/84/841f0c93e373bad4.mat",
         "/automat/cf/cf0a056cbdd16884.mat",
         "/automat/da/da4d9d4cbfbf1693.mat",
-        "/automat/3b/3be06047c43a8a4d.mat",
+        "/automat/3b/3be06047c43a8f77.mat",
         "/automat/ec/ecc5854f240fb7d9.mat"
     };
 
@@ -39,9 +39,9 @@ public class MainActivity : Activity
     private Button _renderButton = null!;
     private Button _copyButton = null!;
 
-    private GLSurfaceView? _glView;
     private PmgV20Model? _loadedModel;
     private DecodedDdsTexture? _loadedTexture;
+    private GLSurfaceView? _glView;
     private string _diagnosticReport = "";
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -169,10 +169,21 @@ public class MainActivity : Activity
                 var model = PmgV20Reader.Read(pmgFiles[0]);
                 var texture = DdsTextureDecoder.Decode(ddsFiles[0]);
 
-                string materialReport = BuildMaterialReport(reader);
+                var materialData = new byte[]?[MaterialPaths.Length];
+
+                for (int i = 0; i < MaterialPaths.Length; i++)
+                {
+                    var files = reader.Extract(MaterialPaths[i]);
+
+                    if (files.Length > 0)
+                        materialData[i] = files[0];
+                }
+
+                string materialReport =
+                    BuildMaterialReport(materialData);
 
                 string report = BuildReport(
-                    reader.Version,
+                    reader.Version.ToString(),
                     reader.Entries.Count,
                     pmdFiles[0],
                     model,
@@ -206,98 +217,84 @@ public class MainActivity : Activity
         }
     }
 
-    private static string BuildMaterialReport(HashFsReader reader)
+    private static string BuildMaterialReport(byte[]?[] materialData)
     {
         var result = new StringBuilder();
 
         result.AppendLine();
         result.AppendLine("MATERIAL FILE INSPECTION");
-        result.AppendLine("=======================");
+        result.AppendLine("========================");
 
-        foreach (string path in MaterialPaths)
+        for (int i = 0; i < MaterialPaths.Length; i++)
         {
             result.AppendLine();
             result.AppendLine("----------------------------------------");
-            result.AppendLine("FILE: " + path);
+            result.AppendLine("FILE: " + MaterialPaths[i]);
             result.AppendLine("----------------------------------------");
 
-            try
+            byte[]? data = materialData[i];
+
+            if (data == null)
             {
-                var files = reader.Extract(path);
+                result.AppendLine("STATUS: NOT FOUND");
+                continue;
+            }
 
-                if (files.Length == 0)
-                {
-                    result.AppendLine("STATUS: NOT FOUND");
-                    continue;
-                }
+            result.AppendLine("STATUS: FOUND");
+            result.AppendLine($"SIZE: {data.Length} bytes");
 
-                byte[] data = files[0];
+            result.AppendLine();
+            result.AppendLine("FIRST 96 BYTES:");
 
-                result.AppendLine("STATUS: FOUND");
-                result.AppendLine($"SIZE: {data.Length} bytes");
+            int limit = Math.Min(data.Length, 96);
 
-                result.AppendLine();
-                result.AppendLine("FIRST 96 BYTES:");
+            for (int j = 0; j < limit; j += 16)
+            {
+                int count = Math.Min(16, limit - j);
 
-                int limit = Math.Min(data.Length, 96);
+                result.Append($"{j:X4}: ");
 
-                for (int i = 0; i < limit; i += 16)
-                {
-                    int count = Math.Min(16, limit - i);
-
-                    result.Append($"{i:X4}: ");
-
-                    for (int j = 0; j < count; j++)
-                        result.Append($"{data[i + j]:X2} ");
-
-                    result.AppendLine();
-                }
+                for (int k = 0; k < count; k++)
+                    result.Append($"{data[j + k]:X2} ");
 
                 result.AppendLine();
-                result.AppendLine("READABLE CONTENT:");
+            }
 
-                string decoded = Encoding.UTF8.GetString(data);
+            result.AppendLine();
+            result.AppendLine("READABLE CONTENT:");
 
-                var readable = new StringBuilder();
+            string decoded = Encoding.UTF8.GetString(data);
 
-                foreach (char c in decoded)
+            var readable = new StringBuilder();
+
+            foreach (char c in decoded)
+            {
+                if (c == '\r' || c == '\n' || c == '\t' ||
+                    !char.IsControl(c))
+                    readable.Append(c);
+            }
+
+            string content = readable.ToString().Trim();
+
+            if (content.Length == 0)
+            {
+                result.AppendLine("(No readable text detected.)");
+            }
+            else
+            {
+                const int maxCharacters = 12000;
+
+                if (content.Length > maxCharacters)
                 {
-                    if (c == '\r' || c == '\n' || c == '\t' ||
-                        !char.IsControl(c))
-                    {
-                        readable.Append(c);
-                    }
-                }
+                    result.AppendLine(
+                        content.Substring(0, maxCharacters));
 
-                string content = readable.ToString().Trim();
-
-                if (content.Length == 0)
-                {
-                    result.AppendLine("(No readable text detected.)");
+                    result.AppendLine("[CONTENT TRUNCATED]");
                 }
                 else
                 {
-                    const int maxCharacters = 12000;
-
-                    if (content.Length > maxCharacters)
-                    {
-                        result.AppendLine(
-                            content.Substring(0, maxCharacters));
-
-                        result.AppendLine();
-                        result.AppendLine("[CONTENT TRUNCATED]");
-                    }
-                    else
-                    {
-                        result.AppendLine(content);
-                    }
+                    result.AppendLine(content);
                 }
-            }
-            catch (Exception ex)
-            {
-                result.AppendLine(
-                    "READ ERROR: " +
-                    ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -308,7 +305,7 @@ public class MainActivity : Activity
     }
 
     private static string BuildReport(
-        ushort hashVersion,
+        string hashVersion,
         int entryCount,
         byte[] pmd,
         PmgV20Model model,
@@ -336,9 +333,7 @@ public class MainActivity : Activity
         foreach (byte value in pmd)
         {
             if (value >= 32 && value <= 126)
-            {
                 current.Append((char)value);
-            }
             else
             {
                 if (current.Length >= 4)
@@ -376,7 +371,6 @@ public class MainActivity : Activity
         result.AppendLine($"RGBA bytes: {texture.Rgba.Length}");
 
         result.AppendLine(materialReport);
-
         result.AppendLine();
         result.AppendLine("END OF DIAGNOSTIC REPORT");
 
