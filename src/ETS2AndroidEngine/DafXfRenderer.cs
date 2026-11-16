@@ -78,8 +78,6 @@ public sealed class DafXfRenderer :
         public bool HasTextureCoordinates;
     }
 
-    // Compatibility constructor:
-    // MainActivity currently calls this two-argument version.
     public DafXfRenderer(
         PmgV20Model model,
         DecodedDdsTexture colorTexture)
@@ -87,7 +85,6 @@ public sealed class DafXfRenderer :
     {
     }
 
-    // Full constructor for when glass_ex.dds is loaded separately.
     public DafXfRenderer(
         PmgV20Model model,
         DecodedDdsTexture colorTexture,
@@ -111,10 +108,7 @@ public sealed class DafXfRenderer :
         {
             Width = 1,
             Height = 1,
-            Rgba = new byte[]
-            {
-                190, 225, 215, 255
-            }
+            Rgba = new byte[] { 190, 225, 215, 255 }
         };
     }
 
@@ -215,7 +209,6 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Exclude shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -237,7 +230,6 @@ public sealed class DafXfRenderer :
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
 
-                // Use UV0 for the base texture.
                 if (vertex.TextureCoordinates.Length > 0)
                 {
                     var uv = vertex.TextureCoordinates[0];
@@ -480,12 +472,11 @@ public sealed class DafXfRenderer :
                 GLES20.GlTexture2d,
                 selectedTexture);
 
+            // Diagnostic: remove artificial tint.
+            // Display the decoded texture colours unchanged.
             GLES20.GlUniform4f(
                 _colorHandle,
-                isGlass ? 0.8752f : 0.72f,
-                isGlass ? 0.966216f : 0.74f,
-                isGlass ? 0.924392f : 0.77f,
-                1f);
+                1f, 1f, 1f, 1f);
 
             GLES20.GlUniform1f(
                 _useTextureHandle,
