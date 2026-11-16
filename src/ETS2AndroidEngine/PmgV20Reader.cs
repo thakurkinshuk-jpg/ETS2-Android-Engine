@@ -368,7 +368,9 @@ namespace ETS2AndroidEngine
             if (offset < poolOffset || length < 0 || end > poolEnd)
             {
                 throw new InvalidOperationException(
-                    $"PMG {name} data is outside its declared pool.");
+                    $"PMG {name} outside pool: " +
+                    $"offset={offset}, length={length}, " +
+                    $"poolStart={poolOffset}, poolSize={poolSize}.");
             }
         }
 
