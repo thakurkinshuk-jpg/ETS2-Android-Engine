@@ -19,12 +19,25 @@ public class MainActivity : Activity
 {
     private const int PickArchiveRequest = 1001;
 
+    private static readonly string[] MaterialPaths =
+    {
+        "/automat/86/86b2c2e652897f77.mat",
+        "/automat/b3/b3a48013e515444f.mat",
+        "/automat/9f/9f2d80ad77b3c72a.mat",
+        "/automat/5d/5d99dcfbd26bebf0.mat",
+        "/automat/f0/f0d34c6670855c56.mat",
+        "/automat/84/841f0c93e373bad4.mat",
+        "/automat/cf/cf0a056cbdd16884.mat",
+        "/automat/da/da4d9d4cbfbf1693.mat",
+        "/automat/3b/3be06047c43a8a4d.mat",
+        "/automat/ec/ecc5854f240fb7d9.mat"
+    };
+
     private TextView _status = null!;
     private TextView _report = null!;
     private Button _selectButton = null!;
     private Button _renderButton = null!;
     private Button _copyButton = null!;
-    private ScrollView _scroll = null!;
 
     private GLSurfaceView? _glView;
     private PmgV20Model? _loadedModel;
@@ -44,7 +57,7 @@ public class MainActivity : Activity
 
         var title = new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL DIAGNOSTICS",
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL INSPECTION",
             TextSize = 21
         };
 
@@ -73,12 +86,12 @@ public class MainActivity : Activity
 
         _report = new TextView(this)
         {
-            Text = "Diagnostic report will appear here.",
+            Text = "Material diagnostic report will appear here.",
             TextSize = 12
         };
 
-        _scroll = new ScrollView(this);
-        _scroll.AddView(_report);
+        var scroll = new ScrollView(this);
+        scroll.AddView(_report);
 
         _selectButton.Click += (_, _) => SelectArchive();
         _renderButton.Click += (_, _) => ShowTruck();
@@ -89,7 +102,7 @@ public class MainActivity : Activity
         layout.AddView(_renderButton);
         layout.AddView(_copyButton);
         layout.AddView(_status);
-        layout.AddView(_scroll);
+        layout.AddView(scroll);
 
         SetContentView(layout);
     }
@@ -122,8 +135,8 @@ public class MainActivity : Activity
         _copyButton.Enabled = false;
 
         _diagnosticReport = "";
-        _status.Text = "Inspecting DAF XF files...";
         _report.Text = "";
+        _status.Text = "Inspecting truck and material files...\nPlease wait.";
 
         try
         {
@@ -156,12 +169,15 @@ public class MainActivity : Activity
                 var model = PmgV20Reader.Read(pmgFiles[0]);
                 var texture = DdsTextureDecoder.Decode(ddsFiles[0]);
 
+                string materialReport = BuildMaterialReport(reader);
+
                 string report = BuildReport(
                     reader.Version,
                     reader.Entries.Count,
                     pmdFiles[0],
                     model,
-                    texture);
+                    texture,
+                    materialReport);
 
                 return (
                     Model: model,
@@ -172,11 +188,10 @@ public class MainActivity : Activity
 
             _loadedModel = loaded.Model;
             _loadedTexture = loaded.Texture;
-
             _diagnosticReport = loaded.Report;
-            _report.Text = _diagnosticReport;
 
-            _status.Text = "DIAGNOSTIC INSPECTION COMPLETED";
+            _report.Text = _diagnosticReport;
+            _status.Text = "TRUCK AND MATERIAL INSPECTION COMPLETED";
 
             _renderButton.Enabled = true;
             _copyButton.Enabled = true;
@@ -191,22 +206,105 @@ public class MainActivity : Activity
         }
     }
 
-    private void CopyReport()
+    private static string BuildMaterialReport(HashFsReader reader)
     {
-        if (string.IsNullOrWhiteSpace(_diagnosticReport))
-            return;
+        var result = new StringBuilder();
 
-        var clipboard =
-            (ClipboardManager)GetSystemService(ClipboardService)!;
+        result.AppendLine();
+        result.AppendLine("MATERIAL FILE INSPECTION");
+        result.AppendLine("=======================");
 
-        clipboard.PrimaryClip = ClipData.NewPlainText(
-            "ETS2 DAF XF diagnostic report",
-            _diagnosticReport);
+        foreach (string path in MaterialPaths)
+        {
+            result.AppendLine();
+            result.AppendLine("----------------------------------------");
+            result.AppendLine("FILE: " + path);
+            result.AppendLine("----------------------------------------");
 
-        Toast.MakeText(
-            this,
-            "Diagnostic report copied!",
-            ToastLength.Short)!.Show();
+            try
+            {
+                var files = reader.Extract(path);
+
+                if (files.Length == 0)
+                {
+                    result.AppendLine("STATUS: NOT FOUND");
+                    continue;
+                }
+
+                byte[] data = files[0];
+
+                result.AppendLine("STATUS: FOUND");
+                result.AppendLine($"SIZE: {data.Length} bytes");
+
+                result.AppendLine();
+                result.AppendLine("FIRST 96 BYTES:");
+
+                int limit = Math.Min(data.Length, 96);
+
+                for (int i = 0; i < limit; i += 16)
+                {
+                    int count = Math.Min(16, limit - i);
+
+                    result.Append($"{i:X4}: ");
+
+                    for (int j = 0; j < count; j++)
+                        result.Append($"{data[i + j]:X2} ");
+
+                    result.AppendLine();
+                }
+
+                result.AppendLine();
+                result.AppendLine("READABLE CONTENT:");
+
+                string decoded = Encoding.UTF8.GetString(data);
+
+                var readable = new StringBuilder();
+
+                foreach (char c in decoded)
+                {
+                    if (c == '\r' || c == '\n' || c == '\t' ||
+                        !char.IsControl(c))
+                    {
+                        readable.Append(c);
+                    }
+                }
+
+                string content = readable.ToString().Trim();
+
+                if (content.Length == 0)
+                {
+                    result.AppendLine("(No readable text detected.)");
+                }
+                else
+                {
+                    const int maxCharacters = 12000;
+
+                    if (content.Length > maxCharacters)
+                    {
+                        result.AppendLine(
+                            content.Substring(0, maxCharacters));
+
+                        result.AppendLine();
+                        result.AppendLine("[CONTENT TRUNCATED]");
+                    }
+                    else
+                    {
+                        result.AppendLine(content);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result.AppendLine(
+                    "READ ERROR: " +
+                    ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        result.AppendLine();
+        result.AppendLine("END OF MATERIAL INSPECTION");
+
+        return result.ToString();
     }
 
     private static string BuildReport(
@@ -214,7 +312,8 @@ public class MainActivity : Activity
         int entryCount,
         byte[] pmd,
         PmgV20Model model,
-        DecodedDdsTexture texture)
+        DecodedDdsTexture texture,
+        string materialReport)
     {
         var result = new StringBuilder();
 
@@ -227,23 +326,6 @@ public class MainActivity : Activity
         result.AppendLine("TRUCK.PMD");
         result.AppendLine("---------");
         result.AppendLine($"File size: {pmd.Length} bytes");
-
-        result.AppendLine();
-        result.AppendLine("PMD HEX DATA (FIRST 256 BYTES)");
-
-        int limit = Math.Min(pmd.Length, 256);
-
-        for (int i = 0; i < limit; i += 16)
-        {
-            int count = Math.Min(16, limit - i);
-
-            result.Append($"{i:X4}: ");
-
-            for (int j = 0; j < count; j++)
-                result.Append($"{pmd[i + j]:X2} ");
-
-            result.AppendLine();
-        }
 
         result.AppendLine();
         result.AppendLine("READABLE PMD STRINGS");
@@ -293,10 +375,30 @@ public class MainActivity : Activity
         result.AppendLine($"Height: {texture.Height}");
         result.AppendLine($"RGBA bytes: {texture.Rgba.Length}");
 
+        result.AppendLine(materialReport);
+
         result.AppendLine();
         result.AppendLine("END OF DIAGNOSTIC REPORT");
 
         return result.ToString();
+    }
+
+    private void CopyReport()
+    {
+        if (string.IsNullOrWhiteSpace(_diagnosticReport))
+            return;
+
+        var clipboard =
+            (ClipboardManager)GetSystemService(ClipboardService)!;
+
+        clipboard.PrimaryClip = ClipData.NewPlainText(
+            "ETS2 material diagnostic report",
+            _diagnosticReport);
+
+        Toast.MakeText(
+            this,
+            "Diagnostic report copied!",
+            ToastLength.Short)!.Show();
     }
 
     private void ShowTruck()
