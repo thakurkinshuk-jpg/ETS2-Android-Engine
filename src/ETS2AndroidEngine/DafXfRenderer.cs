@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using Android.Opengl;
 using Java.Nio;
-using Javax.Microedition.Khronos.Egl;
 using Javax.Microedition.Khronos.Opengles;
+using EGLConfig = Javax.Microedition.Khronos.Egl.EGLConfig;
 
 namespace ETS2AndroidEngine;
 
