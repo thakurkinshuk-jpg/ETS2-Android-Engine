@@ -1,11 +1,13 @@
 using Android.App;
 using Android.Content;
+using Android.Opengl;
 using Android.OS;
 using Android.Views;
 using Android.Widget;
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using TruckLib.HashFs;
 
 namespace ETS2AndroidEngine;
 
@@ -18,8 +20,8 @@ public class MainActivity : Activity
     private const int PickArchiveRequest = 1001;
 
     private TextView _status = null!;
-    private TextView _output = null!;
     private Button _selectButton = null!;
+    private GLSurfaceView? _glView;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -34,43 +36,26 @@ public class MainActivity : Activity
 
         var title = new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nHashFS Archive Reader",
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF 3D MODEL",
             TextSize = 22
         };
 
         _selectButton = new Button(this)
         {
-            Text = "SELECT ETS2 SCS ARCHIVE"
+            Text = "SELECT ETS2 BASE.SCS"
         };
 
         _status = new TextView(this)
         {
-            Text = "No archive selected.",
-            TextSize = 14
+            Text = "Select your original ETS2 base.scs archive.",
+            TextSize = 16
         };
-
-        _output = new TextView(this)
-        {
-            Text = "Choose an original ETS2 .scs file to inspect it.",
-            TextSize = 14
-        };
-
-        _output.SetTextIsSelectable(true);
 
         _selectButton.Click += (_, _) => SelectArchive();
-
-        var scroll = new ScrollView(this);
-        scroll.AddView(_output);
 
         layout.AddView(title);
         layout.AddView(_selectButton);
         layout.AddView(_status);
-        layout.AddView(
-            scroll,
-            new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MatchParent,
-                0,
-                1f));
 
         SetContentView(layout);
     }
@@ -94,57 +79,60 @@ public class MainActivity : Activity
         if (requestCode != PickArchiveRequest ||
             resultCode != Result.Ok ||
             data?.Data == null)
-        {
             return;
-        }
 
         var uri = data.Data;
 
         _selectButton.Enabled = false;
-        _status.Text = "Reading selected archive...";
-        _output.Text = "Please wait. Large archives may take some time.";
+        _status.Text = "Loading DAF XF model...\nPlease wait.";
 
         try
         {
-            string report = await Task.Run(() =>
+            PmgV20Model model = await Task.Run(() =>
             {
-                string tempPath = Path.Combine(
-                    CacheDir!.AbsolutePath,
-                    $"ets2-{Guid.NewGuid():N}.scs");
+                using var input =
+                    ContentResolver!.OpenInputStream(uri)
+                    ?? throw new IOException("Cannot open selected archive.");
 
-                try
-                {
-                    using (var input =
-                        ContentResolver!.OpenInputStream(uri)
-                        ?? throw new IOException("Cannot open selected file."))
-                    using (var output = File.Create(tempPath))
-                    {
-                        input.CopyTo(output);
-                    }
+                using var reader = HashFsReader.Open(input);
 
-                    using var archive = File.OpenRead(tempPath);
+                var files = reader.Extract(
+                    "/vehicle/truck/daf_xf/truck.pmg");
 
-                    return HashFsArchiveInspector.Inspect(archive);
-                }
-                finally
-                {
-                    if (File.Exists(tempPath))
-                        File.Delete(tempPath);
-                }
+                if (files.Length == 0)
+                    throw new FileNotFoundException(
+                        "DAF XF truck.pmg was not found.");
+
+                return PmgV20Reader.Read(files[0]);
             });
 
-            _output.Text = report;
-            _status.Text = "Archive inspection completed.";
+            _glView = new GLSurfaceView(this);
+            _glView.SetEGLContextClientVersion(2);
+            _glView.SetRenderer(new DafXfRenderer(model));
+            _glView.SetRenderMode(1);
+
+            SetContentView(_glView);
         }
         catch (Exception ex)
         {
-            _status.Text = "Archive inspection failed.";
-            _output.Text = ex.GetType().Name + "\n" + ex.Message;
-        }
-        finally
-        {
+            _status.Text =
+                "MODEL LOADING FAILED\n\n" +
+                ex.GetType().Name + "\n" +
+                ex.Message;
+
             _selectButton.Enabled = true;
         }
     }
-}
 
+    protected override void OnPause()
+    {
+        _glView?.OnPause();
+        base.OnPause();
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        _glView?.OnResume();
+    }
+}
