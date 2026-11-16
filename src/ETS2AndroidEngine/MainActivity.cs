@@ -31,6 +31,20 @@ public class MainActivity : Activity
     private GLSurfaceView? _glView;
     private string _diagnosticReport = "";
 
+    private static readonly string[] MaterialPaths =
+    {
+        "/automat/86/86b2c2e652897f77.mat",
+        "/automat/b3/b3a48013e515444f.mat",
+        "/automat/9f/9f2d80ad77b3c72a.mat",
+        "/automat/5d/5d99dcfbd26bebf0.mat",
+        "/automat/f0/f0d34c6670855c56.mat",
+        "/automat/84/841f0c93e373bad4.mat",
+        "/automat/cf/cf0a056cbdd16884.mat",
+        "/automat/da/da4d9d4cbfbf1693.mat",
+        "/automat/3b/3be06047c43a8a4d.mat",
+        "/automat/ec/ecc5854f240fb7d9.mat"
+    };
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
@@ -44,7 +58,7 @@ public class MainActivity : Activity
 
         layout.AddView(new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL RENDERER",
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL ANALYSIS",
             TextSize = 21
         });
 
@@ -61,7 +75,7 @@ public class MainActivity : Activity
 
         _copyButton = new Button(this)
         {
-            Text = "COPY REPORT",
+            Text = "COPY FULL MATERIAL REPORT",
             Enabled = false
         };
 
@@ -73,7 +87,7 @@ public class MainActivity : Activity
 
         _report = new TextView(this)
         {
-            Text = "Model and texture information will appear here.",
+            Text = "Model, textures and material definitions will appear here.",
             TextSize = 12
         };
 
@@ -120,7 +134,7 @@ public class MainActivity : Activity
         _renderButton.Enabled = false;
         _copyButton.Enabled = false;
 
-        _status.Text = "Loading DAF XF model and four textures...";
+        _status.Text = "Reading DAF XF geometry, textures and materials...";
         _report.Text = "";
 
         try
@@ -191,6 +205,91 @@ public class MainActivity : Activity
                 }
 
                 report.AppendLine();
+                report.AppendLine("UV CHANNEL DIAGNOSTICS");
+
+                for (int material = 0; material <= 9; material++)
+                {
+                    report.AppendLine();
+                    report.AppendLine($"MATERIAL {material}");
+
+                    foreach (var piece in model.Pieces)
+                    {
+                        if (piece.MaterialIndex != material)
+                            continue;
+
+                        report.AppendLine(
+                            $"Piece {piece.Index}: vertices={piece.VertexCount}, UV channels={piece.TexCoordWidth}");
+
+                        for (int channel = 0;
+                             channel < piece.TexCoordWidth;
+                             channel++)
+                        {
+                            float minU = float.MaxValue;
+                            float maxU = float.MinValue;
+                            float minV = float.MaxValue;
+                            float maxV = float.MinValue;
+
+                            int valid = 0;
+
+                            foreach (var vertex in piece.Vertices)
+                            {
+                                if (vertex.TextureCoordinates.Length <= channel)
+                                    continue;
+
+                                var uv = vertex.TextureCoordinates[channel];
+
+                                if (float.IsNaN(uv.X) ||
+                                    float.IsNaN(uv.Y) ||
+                                    float.IsInfinity(uv.X) ||
+                                    float.IsInfinity(uv.Y))
+                                    continue;
+
+                                minU = Math.Min(minU, uv.X);
+                                maxU = Math.Max(maxU, uv.X);
+                                minV = Math.Min(minV, uv.Y);
+                                maxV = Math.Max(maxV, uv.Y);
+                                valid++;
+                            }
+
+                            if (valid > 0)
+                            {
+                                report.AppendLine(
+                                    $"  UV{channel}: U={minU:F3}..{maxU:F3}, V={minV:F3}..{maxV:F3}");
+                            }
+                        }
+                    }
+                }
+
+                report.AppendLine();
+                report.AppendLine("DAF XF MATERIAL DEFINITIONS");
+                report.AppendLine("============================");
+
+                for (int i = 0; i < MaterialPaths.Length; i++)
+                {
+                    string path = MaterialPaths[i];
+
+                    report.AppendLine();
+                    report.AppendLine($"MATERIAL INDEX {i}");
+                    report.AppendLine(path);
+                    report.AppendLine("----------------------------");
+
+                    try
+                    {
+                        byte[] bytes = Extract(path);
+
+                        string materialText =
+                            Encoding.UTF8.GetString(bytes);
+
+                        report.AppendLine(materialText);
+                    }
+                    catch (Exception ex)
+                    {
+                        report.AppendLine(
+                            "MATERIAL READ ERROR: " + ex.Message);
+                    }
+                }
+
+                report.AppendLine();
                 report.AppendLine("FOUR TEXTURES DECODED SUCCESSFULLY.");
 
                 return (
@@ -212,7 +311,7 @@ public class MainActivity : Activity
             _diagnosticReport = loaded.Report;
             _report.Text = _diagnosticReport;
 
-            _status.Text = "MODEL AND FOUR TEXTURES LOADED";
+            _status.Text = "MODEL, TEXTURES AND MATERIALS ANALYZED";
 
             _renderButton.Enabled = true;
             _copyButton.Enabled = true;
@@ -268,12 +367,12 @@ public class MainActivity : Activity
                 ClipboardService)!;
 
         clipboard.PrimaryClip = ClipData.NewPlainText(
-            "ETS2 DAF XF report",
+            "ETS2 DAF XF full material report",
             _diagnosticReport);
 
         Toast.MakeText(
             this,
-            "Report copied!",
+            "Full material report copied!",
             ToastLength.Short)!.Show();
     }
 
