@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using Android.Opengl;
@@ -13,27 +12,41 @@ public sealed class DafXfRenderer :
 {
     private const string VertexShader = @"
         attribute vec3 aPosition;
+        attribute vec2 aTexCoord;
         uniform mat4 uMvp;
+        varying vec2 vTexCoord;
 
         void main()
         {
             gl_Position = uMvp * vec4(aPosition, 1.0);
+            vTexCoord = aTexCoord;
         }";
 
     private const string FragmentShader = @"
         precision mediump float;
 
+        uniform sampler2D uTexture;
+        varying vec2 vTexCoord;
+
         void main()
         {
-            gl_FragColor = vec4(0.72, 0.76, 0.82, 1.0);
+            gl_FragColor = texture2D(uTexture, vTexCoord);
         }";
 
     private readonly PmgV20Model _model;
+    private readonly DecodedDdsTexture _color;
+    private readonly DecodedDdsTexture _glass;
+
     private readonly List<PieceBuffer> _buffers = new();
 
     private int _program;
     private int _positionHandle;
+    private int _uvHandle;
     private int _mvpHandle;
+    private int _textureHandle;
+
+    private int _colorTexture;
+    private int _glassTexture;
 
     private readonly float[] _projection = new float[16];
     private readonly float[] _view = new float[16];
@@ -48,8 +61,10 @@ public sealed class DafXfRenderer :
     private sealed class PieceBuffer
     {
         public FloatBuffer Vertices = null!;
+        public FloatBuffer Uvs = null!;
         public ShortBuffer Indices = null!;
         public int IndexCount;
+        public int MaterialIndex;
     }
 
     public DafXfRenderer(
@@ -61,6 +76,12 @@ public sealed class DafXfRenderer :
     {
         _model = model ??
             throw new ArgumentNullException(nameof(model));
+
+        _color = color ??
+            throw new ArgumentNullException(nameof(color));
+
+        _glass = glass ??
+            throw new ArgumentNullException(nameof(glass));
 
         CalculateBounds();
     }
@@ -124,11 +145,22 @@ public sealed class DafXfRenderer :
             GLES20.GlGetAttribLocation(
                 _program, "aPosition");
 
+        _uvHandle =
+            GLES20.GlGetAttribLocation(
+                _program, "aTexCoord");
+
         _mvpHandle =
             GLES20.GlGetUniformLocation(
                 _program, "uMvp");
 
+        _textureHandle =
+            GLES20.GlGetUniformLocation(
+                _program, "uTexture");
+
         BuildBuffers();
+
+        _colorTexture = UploadTexture(_color);
+        _glassTexture = UploadTexture(_glass);
     }
 
     private void BuildBuffers()
@@ -141,25 +173,35 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Ignore shadow-only materials for now.
+            // Shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
 
-            var positions =
-                new float[piece.Vertices.Length * 3];
+            int count = piece.Vertices.Length;
 
-            for (int i = 0; i < piece.Vertices.Length; i++)
+            var positions = new float[count * 3];
+            var uvs = new float[count * 2];
+
+            for (int i = 0; i < count; i++)
             {
-                var p = piece.Vertices[i].Position;
+                var vertex = piece.Vertices[i];
+                var p = vertex.Position;
 
                 positions[i * 3] = p.X;
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
+
+                if (vertex.TextureCoordinates.Length > 0)
+                {
+                    var uv = vertex.TextureCoordinates[0];
+
+                    uvs[i * 2] = uv.X;
+                    uvs[i * 2 + 1] = 1f - uv.Y;
+                }
             }
 
-            var indices =
-                new short[piece.Indices.Length];
+            var indices = new short[piece.Indices.Length];
 
             for (int i = 0; i < indices.Length; i++)
                 indices[i] =
@@ -173,6 +215,14 @@ public sealed class DafXfRenderer :
             vertexBuffer.Put(positions);
             vertexBuffer.Position(0);
 
+            var uvBuffer = ByteBuffer
+                .AllocateDirect(uvs.Length * 4)
+                .Order(ByteOrder.NativeOrder()!)
+                .AsFloatBuffer();
+
+            uvBuffer.Put(uvs);
+            uvBuffer.Position(0);
+
             var indexBuffer = ByteBuffer
                 .AllocateDirect(indices.Length * 2)
                 .Order(ByteOrder.NativeOrder()!)
@@ -184,10 +234,70 @@ public sealed class DafXfRenderer :
             _buffers.Add(new PieceBuffer
             {
                 Vertices = vertexBuffer,
+                Uvs = uvBuffer,
                 Indices = indexBuffer,
-                IndexCount = indices.Length
+                IndexCount = indices.Length,
+                MaterialIndex = piece.MaterialIndex
             });
         }
+    }
+
+    private static int UploadTexture(
+        DecodedDdsTexture texture)
+    {
+        var pixels =
+            ByteBuffer.AllocateDirect(texture.Rgba.Length);
+
+        pixels.Put(texture.Rgba);
+        pixels.Position(0);
+
+        var ids = new int[1];
+
+        GLES20.GlGenTextures(1, ids, 0);
+
+        int id = ids[0];
+
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d, id);
+
+        GLES20.GlPixelStorei(
+            GLES20.GlUnpackAlignment, 1);
+
+        GLES20.GlTexParameteri(
+            GLES20.GlTexture2d,
+            GLES20.GlTextureMinFilter,
+            GLES20.GlLinear);
+
+        GLES20.GlTexParameteri(
+            GLES20.GlTexture2d,
+            GLES20.GlTextureMagFilter,
+            GLES20.GlLinear);
+
+        GLES20.GlTexParameteri(
+            GLES20.GlTexture2d,
+            GLES20.GlTextureWrapS,
+            GLES20.GlRepeat);
+
+        GLES20.GlTexParameteri(
+            GLES20.GlTexture2d,
+            GLES20.GlTextureWrapT,
+            GLES20.GlRepeat);
+
+        GLES20.GlTexImage2D(
+            GLES20.GlTexture2d,
+            0,
+            GLES20.GlRgba,
+            texture.Width,
+            texture.Height,
+            0,
+            GLES20.GlRgba,
+            GLES20.GlUnsignedByte,
+            pixels);
+
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d, 0);
+
+        return id;
     }
 
     public void OnSurfaceChanged(
@@ -254,12 +364,22 @@ public sealed class DafXfRenderer :
             _mvpHandle, 1,
             false, _mvp, 0);
 
+        GLES20.GlUniform1i(
+            _textureHandle, 0);
+
+        GLES20.GlActiveTexture(
+            GLES20.GlTexture0);
+
         GLES20.GlEnableVertexAttribArray(
             _positionHandle);
+
+        GLES20.GlEnableVertexAttribArray(
+            _uvHandle);
 
         foreach (var piece in _buffers)
         {
             piece.Vertices.Position(0);
+            piece.Uvs.Position(0);
             piece.Indices.Position(0);
 
             GLES20.GlVertexAttribPointer(
@@ -270,6 +390,22 @@ public sealed class DafXfRenderer :
                 0,
                 piece.Vertices);
 
+            GLES20.GlVertexAttribPointer(
+                _uvHandle,
+                2,
+                GLES20.GlFloat,
+                false,
+                0,
+                piece.Uvs);
+
+            int texture =
+                piece.MaterialIndex == 8
+                    ? _glassTexture
+                    : _colorTexture;
+
+            GLES20.GlBindTexture(
+                GLES20.GlTexture2d, texture);
+
             GLES20.GlDrawElements(
                 GLES20.GlTriangles,
                 piece.IndexCount,
@@ -279,6 +415,12 @@ public sealed class DafXfRenderer :
 
         GLES20.GlDisableVertexAttribArray(
             _positionHandle);
+
+        GLES20.GlDisableVertexAttribArray(
+            _uvHandle);
+
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d, 0);
 
         GLES20.GlUseProgram(0);
     }
