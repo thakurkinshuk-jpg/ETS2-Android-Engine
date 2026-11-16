@@ -161,8 +161,8 @@ public class MainActivity : Activity
 
                 var report = new StringBuilder();
 
-                report.AppendLine("ETS2 DAF XF MATERIAL REPORT");
-                report.AppendLine("---------------------------");
+                report.AppendLine("ETS2 DAF XF MODEL REPORT");
+                report.AppendLine("------------------------");
                 report.AppendLine($"Pieces: {model.PieceCount}");
                 report.AppendLine($"Parts: {model.PartCount}");
                 report.AppendLine($"Bones: {model.BoneCount}");
@@ -244,12 +244,11 @@ public class MainActivity : Activity
         _glView = new GLSurfaceView(this);
         _glView.SetEGLContextClientVersion(2);
 
+        // IMPORTANT: Current DafXfRenderer accepts three arguments.
         _glView.SetRenderer(new DafXfRenderer(
             _model,
             _color,
-            _glass,
-            _lightmask,
-            _environment));
+            _glass));
 
         _glView.RenderMode = Rendermode.Continuously;
 
