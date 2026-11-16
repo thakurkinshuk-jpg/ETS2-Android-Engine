@@ -146,7 +146,7 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
             var vertexBuffer = ByteBuffer
                 .AllocateDirect(positions.Length * 4)
-                .Order(ByteOrder.NativeOrder())
+                .Order(ByteOrder.NativeOrder()!)
                 .AsFloatBuffer();
 
             vertexBuffer.Put(positions);
@@ -154,7 +154,7 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
             var indexBuffer = ByteBuffer
                 .AllocateDirect(indexData.Length * 2)
-                .Order(ByteOrder.NativeOrder())
+                .Order(ByteOrder.NativeOrder()!)
                 .AsShortBuffer();
 
             indexBuffer.Put(indexData);
@@ -182,8 +182,8 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
         Matrix.SetLookAtM(
             _view, 0,
-            0f, 0f, 3.5f,
-            0f, 0f, 0f,
+            0f, 0f, 4.2f,
+            0f, -0.15f, 0f,
             0f, 1f, 0f);
     }
 
@@ -200,10 +200,8 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 
         Matrix.SetIdentityM(_modelMatrix, 0);
 
-        Matrix.TranslateM(
-            _modelMatrix, 0,
-            -_centerX, -_centerY, -_centerZ);
-
+        // Correct transformation order:
+        // rotate, scale, then move the model origin to its center.
         Matrix.RotateM(
             _modelMatrix, 0,
             _rotation, 0f, 1f, 0f);
@@ -211,6 +209,10 @@ public sealed class DafXfRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
         Matrix.ScaleM(
             _modelMatrix, 0,
             _scale, _scale, _scale);
+
+        Matrix.TranslateM(
+            _modelMatrix, 0,
+            -_centerX, -_centerY, -_centerZ);
 
         Matrix.MultiplyMM(
             _mv, 0, _view, 0, _modelMatrix, 0);
