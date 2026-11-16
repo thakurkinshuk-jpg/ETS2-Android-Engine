@@ -5,6 +5,7 @@ using Android.OS;
 using Android.Widget;
 using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using TruckLib.HashFs;
 
@@ -19,8 +20,14 @@ public class MainActivity : Activity
     private const int PickArchiveRequest = 1001;
 
     private TextView _status = null!;
+    private TextView _report = null!;
     private Button _selectButton = null!;
+    private Button _renderButton = null!;
+    private ScrollView _scroll = null!;
+
     private GLSurfaceView? _glView;
+    private PmgV20Model? _loadedModel;
+    private DecodedDdsTexture? _loadedTexture;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -31,12 +38,12 @@ public class MainActivity : Activity
             Orientation = Orientation.Vertical
         };
 
-        layout.SetPadding(24, 24, 24, 24);
+        layout.SetPadding(20, 20, 20, 20);
 
         var title = new TextView(this)
         {
-            Text = "ETS2 ANDROID ENGINE\n\nDAF XF TEXTURE TEST",
-            TextSize = 22
+            Text = "ETS2 ANDROID ENGINE\n\nDAF XF MATERIAL DIAGNOSTICS",
+            TextSize = 21
         };
 
         _selectButton = new Button(this)
@@ -44,17 +51,35 @@ public class MainActivity : Activity
             Text = "SELECT ETS2 BASE.SCS"
         };
 
+        _renderButton = new Button(this)
+        {
+            Text = "VIEW DAF XF TRUCK",
+            Enabled = false
+        };
+
         _status = new TextView(this)
         {
             Text = "Select your original ETS2 base.scs archive.",
-            TextSize = 16
+            TextSize = 15
         };
 
+        _report = new TextView(this)
+        {
+            Text = "Diagnostic report will appear here.",
+            TextSize = 12
+        };
+
+        _scroll = new ScrollView(this);
+        _scroll.AddView(_report);
+
         _selectButton.Click += (_, _) => SelectArchive();
+        _renderButton.Click += (_, _) => ShowTruck();
 
         layout.AddView(title);
         layout.AddView(_selectButton);
+        layout.AddView(_renderButton);
         layout.AddView(_status);
+        layout.AddView(_scroll);
 
         SetContentView(layout);
     }
@@ -83,7 +108,9 @@ public class MainActivity : Activity
         var uri = data.Data;
 
         _selectButton.Enabled = false;
-        _status.Text = "Loading DAF XF model and texture...\nPlease wait.";
+        _renderButton.Enabled = false;
+        _status.Text = "Inspecting PMD materials and loading truck...";
+        _report.Text = "";
 
         try
         {
@@ -91,47 +118,166 @@ public class MainActivity : Activity
             {
                 using var input =
                     ContentResolver!.OpenInputStream(uri)
-                    ?? throw new IOException("Cannot open selected archive.");
+                    ?? throw new IOException("Cannot open archive.");
 
                 using var reader = HashFsReader.Open(input);
 
-                var modelFiles = reader.Extract(
+                var pmdFiles = reader.Extract(
+                    "/vehicle/truck/daf_xf/truck.pmd");
+
+                var pmgFiles = reader.Extract(
                     "/vehicle/truck/daf_xf/truck.pmg");
 
-                if (modelFiles.Length == 0)
-                    throw new FileNotFoundException(
-                        "DAF XF truck.pmg was not found.");
-
-                var textureFiles = reader.Extract(
+                var ddsFiles = reader.Extract(
                     "/vehicle/truck/daf_xf/color.dds");
 
-                if (textureFiles.Length == 0)
-                    throw new FileNotFoundException(
-                        "DAF XF color.dds was not found.");
+                if (pmdFiles.Length == 0)
+                    throw new FileNotFoundException("truck.pmd not found.");
 
-                var model = PmgV20Reader.Read(modelFiles[0]);
-                var texture = DdsTextureDecoder.Decode(textureFiles[0]);
+                if (pmgFiles.Length == 0)
+                    throw new FileNotFoundException("truck.pmg not found.");
 
-                return (Model: model, Texture: texture);
+                if (ddsFiles.Length == 0)
+                    throw new FileNotFoundException("color.dds not found.");
+
+                var model = PmgV20Reader.Read(pmgFiles[0]);
+                var texture = DdsTextureDecoder.Decode(ddsFiles[0]);
+
+                string report = BuildReport(
+                    reader.Version,
+                    reader.Entries.Count,
+                    pmdFiles[0],
+                    model,
+                    texture);
+
+                return (
+                    Model: model,
+                    Texture: texture,
+                    Report: report
+                );
             });
 
-            _glView = new GLSurfaceView(this);
-            _glView.SetEGLContextClientVersion(2);
-            _glView.SetRenderer(
-                new DafXfRenderer(loaded.Model, loaded.Texture));
-            _glView.RenderMode = Rendermode.Continuously;
+            _loadedModel = loaded.Model;
+            _loadedTexture = loaded.Texture;
 
-            SetContentView(_glView);
+            _report.Text = loaded.Report;
+            _status.Text = "DIAGNOSTIC INSPECTION COMPLETED";
+            _renderButton.Enabled = true;
         }
         catch (Exception ex)
         {
             _status.Text =
-                "MODEL OR TEXTURE LOADING FAILED\n\n" +
-                ex.GetType().Name + "\n" +
-                ex.Message;
+                "INSPECTION FAILED\n" +
+                ex.GetType().Name + ": " + ex.Message;
 
             _selectButton.Enabled = true;
         }
+    }
+
+    private static string BuildReport(
+        ushort hashVersion,
+        int entryCount,
+        byte[] pmd,
+        PmgV20Model model,
+        DecodedDdsTexture texture)
+    {
+        var result = new StringBuilder();
+
+        result.AppendLine("ETS2 DAF XF MATERIAL DIAGNOSTICS");
+        result.AppendLine("--------------------------------");
+        result.AppendLine($"HashFS version: {hashVersion}");
+        result.AppendLine($"Archive entries: {entryCount}");
+
+        result.AppendLine();
+        result.AppendLine("TRUCK.PMD");
+        result.AppendLine("---------");
+        result.AppendLine($"File size: {pmd.Length} bytes");
+
+        result.AppendLine();
+        result.AppendLine("PMD HEX DATA (FIRST 256 BYTES)");
+
+        int limit = Math.Min(pmd.Length, 256);
+
+        for (int i = 0; i < limit; i += 16)
+        {
+            int count = Math.Min(16, limit - i);
+
+            result.Append($"{i:X4}: ");
+
+            for (int j = 0; j < count; j++)
+                result.Append($"{pmd[i + j]:X2} ");
+
+            result.AppendLine();
+        }
+
+        result.AppendLine();
+        result.AppendLine("READABLE PMD STRINGS");
+        result.AppendLine("--------------------");
+
+        var current = new StringBuilder();
+
+        foreach (byte value in pmd)
+        {
+            if (value >= 32 && value <= 126)
+            {
+                current.Append((char)value);
+            }
+            else
+            {
+                if (current.Length >= 4)
+                    result.AppendLine(current.ToString());
+
+                current.Clear();
+            }
+        }
+
+        if (current.Length >= 4)
+            result.AppendLine(current.ToString());
+
+        result.AppendLine();
+        result.AppendLine("PMG MODEL INFORMATION");
+        result.AppendLine("---------------------");
+        result.AppendLine($"Pieces: {model.PieceCount}");
+        result.AppendLine($"Parts: {model.PartCount}");
+        result.AppendLine($"Bones: {model.BoneCount}");
+
+        foreach (var piece in model.Pieces)
+        {
+            result.AppendLine();
+            result.AppendLine($"PIECE {piece.Index}");
+            result.AppendLine($"Vertices: {piece.VertexCount}");
+            result.AppendLine($"Triangles: {piece.Indices.Length / 3}");
+            result.AppendLine($"Material index: {piece.MaterialIndex}");
+            result.AppendLine($"UV channel count: {piece.TexCoordWidth}");
+        }
+
+        result.AppendLine();
+        result.AppendLine("TEXTURE INFORMATION");
+        result.AppendLine("-------------------");
+        result.AppendLine($"Width: {texture.Width}");
+        result.AppendLine($"Height: {texture.Height}");
+        result.AppendLine($"RGBA bytes: {texture.Rgba.Length}");
+
+        result.AppendLine();
+        result.AppendLine("END OF DIAGNOSTIC REPORT");
+
+        return result.ToString();
+    }
+
+    private void ShowTruck()
+    {
+        if (_loadedModel == null || _loadedTexture == null)
+            return;
+
+        _glView = new GLSurfaceView(this);
+        _glView.SetEGLContextClientVersion(2);
+
+        _glView.SetRenderer(
+            new DafXfRenderer(_loadedModel, _loadedTexture));
+
+        _glView.RenderMode = Rendermode.Continuously;
+
+        SetContentView(_glView);
     }
 
     protected override void OnPause()
