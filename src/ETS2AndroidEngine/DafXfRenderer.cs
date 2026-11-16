@@ -194,9 +194,10 @@ public sealed class DafXfRenderer :
 
                 if (vertex.TextureCoordinates.Length > 0)
                 {
+                    // Test UV2 for the truck-paint material.
                     int uvChannel = piece.MaterialIndex == 7 &&
-                                    vertex.TextureCoordinates.Length > 1
-                                    ? 1 : 0;
+                                    vertex.TextureCoordinates.Length > 2
+                                    ? 2 : 0;
 
                     var uv = vertex.TextureCoordinates[uvChannel];
 
