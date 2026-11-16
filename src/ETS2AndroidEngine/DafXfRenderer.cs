@@ -37,13 +37,11 @@ public sealed class DafXfRenderer :
         {
             vec4 texColor = texture2D(uTexture, vTexCoord);
             vec4 finalColor = mix(uColor, texColor, uUseTexture);
-
             gl_FragColor = finalColor;
         }";
 
     private readonly PmgV20Model _model;
     private readonly DecodedDdsTexture _texture;
-
     private readonly List<PieceBuffer> _buffers = new();
 
     private int _program;
@@ -186,9 +184,7 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Material 1: shadow-only.
-            // Material 5: fake shadow.
-            // These are not ordinary visible truck surfaces.
+            // Skip shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -204,16 +200,15 @@ public sealed class DafXfRenderer :
             for (int i = 0; i < piece.Vertices.Length; i++)
             {
                 var vertex = piece.Vertices[i];
-
                 var p = vertex.Position;
 
                 positions[i * 3] = p.X;
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
 
-                // UV0 is the base texture coordinate.
-                // Additional UV channels are retained in the
-                // parsed model for later shader implementation.
+                // Use UV0 for the base texture.
+                // UV1 and UV2 remain available for future
+                // material-specific shader support.
                 if (vertex.TextureCoordinates.Length > 0)
                 {
                     var uv = vertex.TextureCoordinates[0];
@@ -304,15 +299,16 @@ public sealed class DafXfRenderer :
             GLES20.GlTextureMagFilter,
             GLES20.GlLinear);
 
+        // Repeat texture coordinates outside the 0-1 range.
         GLES20.GlTexParameteri(
             GLES20.GlTexture2d,
             GLES20.GlTextureWrapS,
-            GLES20.GlClampToEdge);
+            GLES20.GlRepeat);
 
         GLES20.GlTexParameteri(
             GLES20.GlTexture2d,
             GLES20.GlTextureWrapT,
-            GLES20.GlClampToEdge);
+            GLES20.GlRepeat);
 
         GLES20.GlTexImage2D(
             GLES20.GlTexture2d,
@@ -451,11 +447,9 @@ public sealed class DafXfRenderer :
                 piece.HasTextureCoordinates &&
                 piece.MaterialIndex != 8;
 
-            // Glass gets a temporary tinted appearance.
-            // Its real glass_ex texture and reflection shader
-            // will be added in a later rendering step.
             if (piece.MaterialIndex == 8)
             {
+                // Temporary glass tint.
                 GLES20.GlUniform4f(
                     _colorHandle,
                     0.55f, 0.78f, 0.72f, 1f);
