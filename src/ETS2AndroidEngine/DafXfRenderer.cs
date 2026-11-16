@@ -36,6 +36,7 @@ public sealed class DafXfRenderer :
         void main()
         {
             vec4 texColor = texture2D(uTexture, vTexCoord);
+
             gl_FragColor = mix(
                 uColor,
                 texColor * uColor,
@@ -44,8 +45,11 @@ public sealed class DafXfRenderer :
         }";
 
     private readonly PmgV20Model _model;
+
     private readonly DecodedDdsTexture _colorTexture;
     private readonly DecodedDdsTexture _glassTexture;
+    private readonly DecodedDdsTexture _lightmaskTexture;
+    private readonly DecodedDdsTexture _environmentTexture;
 
     private readonly List<PieceBuffer> _buffers = new();
 
@@ -59,6 +63,8 @@ public sealed class DafXfRenderer :
 
     private int _colorGlTexture;
     private int _glassGlTexture;
+    private int _lightmaskGlTexture;
+    private int _environmentGlTexture;
 
     private readonly float[] _projection = new float[16];
     private readonly float[] _view = new float[16];
@@ -86,7 +92,12 @@ public sealed class DafXfRenderer :
     public DafXfRenderer(
         PmgV20Model model,
         DecodedDdsTexture colorTexture)
-        : this(model, colorTexture, CreateFallbackGlassTexture())
+        : this(
+            model,
+            colorTexture,
+            CreateFallbackTexture(),
+            CreateFallbackTexture(),
+            CreateFallbackTexture())
     {
     }
 
@@ -94,6 +105,21 @@ public sealed class DafXfRenderer :
         PmgV20Model model,
         DecodedDdsTexture colorTexture,
         DecodedDdsTexture glassTexture)
+        : this(
+            model,
+            colorTexture,
+            glassTexture,
+            CreateFallbackTexture(),
+            CreateFallbackTexture())
+    {
+    }
+
+    public DafXfRenderer(
+        PmgV20Model model,
+        DecodedDdsTexture colorTexture,
+        DecodedDdsTexture glassTexture,
+        DecodedDdsTexture lightmaskTexture,
+        DecodedDdsTexture environmentTexture)
     {
         _model = model ??
             throw new ArgumentNullException(nameof(model));
@@ -104,10 +130,16 @@ public sealed class DafXfRenderer :
         _glassTexture = glassTexture ??
             throw new ArgumentNullException(nameof(glassTexture));
 
+        _lightmaskTexture = lightmaskTexture ??
+            throw new ArgumentNullException(nameof(lightmaskTexture));
+
+        _environmentTexture = environmentTexture ??
+            throw new ArgumentNullException(nameof(environmentTexture));
+
         CalculateModelBounds();
     }
 
-    private static DecodedDdsTexture CreateFallbackGlassTexture()
+    private static DecodedDdsTexture CreateFallbackTexture()
     {
         return new DecodedDdsTexture
         {
@@ -202,6 +234,8 @@ public sealed class DafXfRenderer :
 
         _colorGlTexture = UploadTexture(_colorTexture);
         _glassGlTexture = UploadTexture(_glassTexture);
+        _lightmaskGlTexture = UploadTexture(_lightmaskTexture);
+        _environmentGlTexture = UploadTexture(_environmentTexture);
     }
 
     private void BuildBuffers()
@@ -486,7 +520,6 @@ public sealed class DafXfRenderer :
                 _useTextureHandle,
                 piece.HasTextureCoordinates ? 1f : 0f);
 
-            // Use the DDS alpha channel for glass blending.
             if (isGlass)
             {
                 GLES20.GlEnable(GLES20.GlBlend);
