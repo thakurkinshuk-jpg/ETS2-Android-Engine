@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Text;
 
 namespace ETS2AndroidEngine;
 
@@ -25,29 +26,30 @@ public static class DdsTextureDecoder
         int height = ReadInt(data, 12);
         int width = ReadInt(data, 16);
 
-        if (headerSize != 124 || width <= 0 || height <= 0 ||
+        if (headerSize != 124 ||
+            width <= 0 || height <= 0 ||
             width > 8192 || height > 8192)
             throw new InvalidOperationException("Invalid DDS dimensions.");
 
-        string format = System.Text.Encoding.ASCII.GetString(data, 84, 4);
+        string format = Encoding.ASCII.GetString(data, 84, 4);
 
-        int blockSize;
-
-        if (format == "DXT1")
-            blockSize = 8;
-        else if (format == "DXT5")
-            blockSize = 16;
-        else
-            throw new NotSupportedException(
-                "Unsupported DDS compression: " + format);
+        int blockSize = format switch
+        {
+            "DXT1" => 8,
+            "DXT5" => 16,
+            _ => throw new NotSupportedException(
+                "Unsupported DDS compression: " + format)
+        };
 
         int blocksX = (width + 3) / 4;
         int blocksY = (height + 3) / 4;
 
-        long required = 128L + (long)blocksX * blocksY * blockSize;
+        long required =
+            128L + (long)blocksX * blocksY * blockSize;
 
         if (required > data.Length)
-            throw new InvalidOperationException("DDS pixel data is incomplete.");
+            throw new InvalidOperationException(
+                "DDS pixel data is incomplete.");
 
         byte[] rgba = new byte[checked(width * height * 4)];
 
@@ -58,9 +60,17 @@ public static class DdsTextureDecoder
             for (int bx = 0; bx < blocksX; bx++)
             {
                 if (format == "DXT1")
-                    DecodeDxt1Block(data, offset, rgba, width, height, bx, by);
+                {
+                    DecodeDxt1Block(
+                        data, offset, rgba,
+                        width, height, bx, by);
+                }
                 else
-                    DecodeDxt5Block(data, offset, rgba, width, height, bx, by);
+                {
+                    DecodeDxt5Block(
+                        data, offset, rgba,
+                        width, height, bx, by);
+                }
 
                 offset += blockSize;
             }
@@ -93,14 +103,20 @@ public static class DdsTextureDecoder
     }
 
     private static void DecodeDxt1Block(
-        byte[] data, int offset, byte[] output,
-        int width, int height, int bx, int by)
+        byte[] data,
+        int offset,
+        byte[] output,
+        int width,
+        int height,
+        int bx,
+        int by)
     {
         ushort c0 = ReadU16(data, offset);
         ushort c1 = ReadU16(data, offset + 2);
         uint indices = ReadU32(data, offset + 4);
 
-        var colors = BuildColors(c0, c1, c0 > c1);
+        byte[][] colors = BuildColors(
+            c0, c1, c0 > c1);
 
         for (int i = 0; i < 16; i++)
         {
@@ -110,14 +126,23 @@ public static class DdsTextureDecoder
             if (x >= width || y >= height)
                 continue;
 
-            int index = (int)((indices >> (i * 2)) & 3);
-            WritePixel(output, width, x, y, colors[index]);
+            int colorIndex =
+                (int)((indices >> (i * 2)) & 3);
+
+            WritePixel(
+                output, width, x, y,
+                colors[colorIndex]);
         }
     }
 
     private static void DecodeDxt5Block(
-        byte[] data, int offset, byte[] output,
-        int width, int height, int bx, int by)
+        byte[] data,
+        int offset,
+        byte[] output,
+        int width,
+        int height,
+        int bx,
+        int by)
     {
         byte a0 = data[offset];
         byte a1 = data[offset + 1];
@@ -125,7 +150,10 @@ public static class DdsTextureDecoder
         ulong alphaBits = 0;
 
         for (int i = 0; i < 6; i++)
-            alphaBits |= (ulong)data[offset + 2 + i] << (8 * i);
+        {
+            alphaBits |=
+                (ulong)data[offset + 2 + i] << (8 * i);
+        }
 
         byte[] alpha = BuildAlphaTable(a0, a1);
 
@@ -133,7 +161,7 @@ public static class DdsTextureDecoder
         ushort c1 = ReadU16(data, offset + 10);
         uint colorBits = ReadU32(data, offset + 12);
 
-        var colors = BuildColors(c0, c1, true);
+        byte[][] colors = BuildColors(c0, c1, true);
 
         for (int i = 0; i < 16; i++)
         {
@@ -143,18 +171,31 @@ public static class DdsTextureDecoder
             if (x >= width || y >= height)
                 continue;
 
-            int colorIndex = (int)((colorBits >> (i * 2)) & 3);
-            int alphaIndex = (int)((alphaBits >> (i * 3)) & 7);
+            int colorIndex =
+                (int)((colorBits >> (i * 2)) & 3);
 
-            byte[] pixel = colors[colorIndex];
-            pixel[3] = alpha[alphaIndex];
+            int alphaIndex =
+                (int)((alphaBits >> (i * 3)) & 7);
+
+            // IMPORTANT:
+            // Never modify the shared colour palette.
+            // Create a separate pixel for each output pixel.
+            byte[] pixel = new byte[]
+            {
+                colors[colorIndex][0],
+                colors[colorIndex][1],
+                colors[colorIndex][2],
+                alpha[alphaIndex]
+            };
 
             WritePixel(output, width, x, y, pixel);
         }
     }
 
     private static byte[][] BuildColors(
-        ushort c0, ushort c1, bool fourColorMode)
+        ushort c0,
+        ushort c1,
+        bool fourColorMode)
     {
         byte[] a = Decode565(c0);
         byte[] b = Decode565(c1);
@@ -171,8 +212,11 @@ public static class DdsTextureDecoder
         {
             for (int c = 0; c < 3; c++)
             {
-                colors[2][c] = (byte)((2 * a[c] + b[c]) / 3);
-                colors[3][c] = (byte)((a[c] + 2 * b[c]) / 3);
+                colors[2][c] =
+                    (byte)((2 * a[c] + b[c]) / 3);
+
+                colors[3][c] =
+                    (byte)((a[c] + 2 * b[c]) / 3);
             }
 
             colors[2][3] = 255;
@@ -181,9 +225,13 @@ public static class DdsTextureDecoder
         else
         {
             for (int c = 0; c < 3; c++)
-                colors[2][c] = (byte)((a[c] + b[c]) / 2);
+            {
+                colors[2][c] =
+                    (byte)((a[c] + b[c]) / 2);
+            }
 
             colors[2][3] = 255;
+
             colors[3][0] = 0;
             colors[3][1] = 0;
             colors[3][2] = 0;
@@ -217,14 +265,18 @@ public static class DdsTextureDecoder
         if (a0 > a1)
         {
             for (int i = 1; i <= 6; i++)
+            {
                 table[i + 1] = (byte)(
                     ((7 - i) * a0 + i * a1) / 7);
+            }
         }
         else
         {
             for (int i = 1; i <= 4; i++)
+            {
                 table[i + 1] = (byte)(
                     ((5 - i) * a0 + i * a1) / 5);
+            }
 
             table[6] = 0;
             table[7] = 255;
@@ -234,7 +286,11 @@ public static class DdsTextureDecoder
     }
 
     private static void WritePixel(
-        byte[] output, int width, int x, int y, byte[] color)
+        byte[] output,
+        int width,
+        int x,
+        int y,
+        byte[] color)
     {
         int index = (y * width + x) * 4;
 
