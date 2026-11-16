@@ -142,59 +142,95 @@ public class MainActivity : Activity
         {
             var loaded = await Task.Run(() =>
             {
-                using var input =
-                    ContentResolver!.OpenInputStream(uri)
-                    ?? throw new IOException("Cannot open archive.");
+                string stage = "Opening selected archive";
 
-                using var reader = HashFsReader.Open(input);
-
-                var pmdFiles = reader.Extract(
-                    "/vehicle/truck/daf_xf/truck.pmd");
-
-                var pmgFiles = reader.Extract(
-                    "/vehicle/truck/daf_xf/truck.pmg");
-
-                var ddsFiles = reader.Extract(
-                    "/vehicle/truck/daf_xf/color.dds");
-
-                if (pmdFiles.Length == 0)
-                    throw new FileNotFoundException("truck.pmd not found.");
-
-                if (pmgFiles.Length == 0)
-                    throw new FileNotFoundException("truck.pmg not found.");
-
-                if (ddsFiles.Length == 0)
-                    throw new FileNotFoundException("color.dds not found.");
-
-                var model = PmgV20Reader.Read(pmgFiles[0]);
-                var texture = DdsTextureDecoder.Decode(ddsFiles[0]);
-
-                var materialData = new byte[]?[MaterialPaths.Length];
-
-                for (int i = 0; i < MaterialPaths.Length; i++)
+                try
                 {
-                    var files = reader.Extract(MaterialPaths[i]);
+                    using var input =
+                        ContentResolver!.OpenInputStream(uri)
+                        ?? throw new IOException("Cannot open archive.");
 
-                    if (files.Length > 0)
-                        materialData[i] = files[0];
+                    using var reader = HashFsReader.Open(input);
+
+                    stage = "Extracting truck.pmd";
+
+                    var pmdFiles = reader.Extract(
+                        "/vehicle/truck/daf_xf/truck.pmd");
+
+                    stage = "Extracting truck.pmg";
+
+                    var pmgFiles = reader.Extract(
+                        "/vehicle/truck/daf_xf/truck.pmg");
+
+                    stage = "Extracting color.dds";
+
+                    var ddsFiles = reader.Extract(
+                        "/vehicle/truck/daf_xf/color.dds");
+
+                    if (pmdFiles.Length == 0)
+                        throw new FileNotFoundException("truck.pmd not found.");
+
+                    if (pmgFiles.Length == 0)
+                        throw new FileNotFoundException("truck.pmg not found.");
+
+                    if (ddsFiles.Length == 0)
+                        throw new FileNotFoundException("color.dds not found.");
+
+                    stage = "Parsing DAF XF model";
+
+                    var model = PmgV20Reader.Read(pmgFiles[0]);
+
+                    stage = "Decoding DAF XF texture";
+
+                    var texture = DdsTextureDecoder.Decode(ddsFiles[0]);
+
+                    var materialData =
+                        new byte[]?[MaterialPaths.Length];
+
+                    for (int i = 0; i < MaterialPaths.Length; i++)
+                    {
+                        try
+                        {
+                            var files = reader.Extract(MaterialPaths[i]);
+
+                            if (files.Length > 0)
+                                materialData[i] = files[0];
+                        }
+                        catch (FileNotFoundException)
+                        {
+                            // Missing material files are optional.
+                            // Continue inspecting the remaining files.
+                            materialData[i] = null;
+                        }
+                    }
+
+                    stage = "Building material diagnostic report";
+
+                    string materialReport =
+                        BuildMaterialReport(materialData);
+
+                    string report = BuildReport(
+                        reader.Version.ToString(),
+                        reader.Entries.Count,
+                        pmdFiles[0],
+                        model,
+                        texture,
+                        materialReport);
+
+                    return (
+                        Model: model,
+                        Texture: texture,
+                        Report: report
+                    );
                 }
-
-                string materialReport =
-                    BuildMaterialReport(materialData);
-
-                string report = BuildReport(
-                    reader.Version.ToString(),
-                    reader.Entries.Count,
-                    pmdFiles[0],
-                    model,
-                    texture,
-                    materialReport);
-
-                return (
-                    Model: model,
-                    Texture: texture,
-                    Report: report
-                );
+                catch (Exception ex)
+                {
+                    throw new IOException(
+                        "Failed during: " + stage +
+                        "\nOriginal error: " + ex.GetType().Name +
+                        ": " + ex.Message,
+                        ex);
+                }
             });
 
             _loadedModel = loaded.Model;
@@ -210,8 +246,7 @@ public class MainActivity : Activity
         catch (Exception ex)
         {
             _status.Text =
-                "INSPECTION FAILED\n" +
-                ex.GetType().Name + ": " + ex.Message;
+                "INSPECTION FAILED\n" + ex.Message;
 
             _selectButton.Enabled = true;
         }
