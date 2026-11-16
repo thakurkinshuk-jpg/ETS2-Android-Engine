@@ -173,7 +173,7 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Shadow-only and fake-shadow materials.
+            // Skip shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
@@ -194,7 +194,11 @@ public sealed class DafXfRenderer :
 
                 if (vertex.TextureCoordinates.Length > 0)
                 {
-                    var uv = vertex.TextureCoordinates[0];
+                    int uvChannel = piece.MaterialIndex == 7 &&
+                                    vertex.TextureCoordinates.Length > 1
+                                    ? 1 : 0;
+
+                    var uv = vertex.TextureCoordinates[uvChannel];
 
                     uvs[i * 2] = uv.X;
                     uvs[i * 2 + 1] = 1f - uv.Y;
