@@ -109,7 +109,9 @@ public class MainActivity : Activity
             _glView = new GLSurfaceView(this);
             _glView.SetEGLContextClientVersion(2);
             _glView.SetRenderer(new DafXfRenderer(model));
-            _glView.SetRenderMode(1);
+
+            // Continuous rendering allows the model to rotate.
+            _glView.RenderMode = 1;
 
             SetContentView(_glView);
         }
@@ -136,3 +138,4 @@ public class MainActivity : Activity
         _glView?.OnResume();
     }
 }
+
