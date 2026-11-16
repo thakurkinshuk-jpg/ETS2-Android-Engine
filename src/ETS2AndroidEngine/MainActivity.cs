@@ -15,18 +15,22 @@ namespace ETS2AndroidEngine;
 public class MainActivity : Activity
 {
     private const int PickArchiveRequest = 1001;
+    private const int ExportTextureRequest = 1002;
 
     private TextView _status = null!;
     private TextView _report = null!;
     private Button _selectButton = null!;
     private Button _renderButton = null!;
     private Button _copyButton = null!;
+    private Button _exportButton = null!;
 
     private PmgV20Model? _model;
     private DecodedDdsTexture? _color;
     private DecodedDdsTexture? _glass;
     private DecodedDdsTexture? _lightmask;
     private DecodedDdsTexture? _environment;
+
+    private byte[]? _colorDds;
 
     private GLSurfaceView? _glView;
     private string _diagnosticReport = "";
@@ -79,6 +83,12 @@ public class MainActivity : Activity
             Enabled = false
         };
 
+        _exportButton = new Button(this)
+        {
+            Text = "EXPORT ORIGINAL COLOR.DDS",
+            Enabled = false
+        };
+
         _status = new TextView(this)
         {
             Text = "Select your original ETS2 base.scs archive.",
@@ -97,10 +107,12 @@ public class MainActivity : Activity
         _selectButton.Click += (_, _) => SelectArchive();
         _renderButton.Click += (_, _) => ShowTruck();
         _copyButton.Click += (_, _) => CopyReport();
+        _exportButton.Click += (_, _) => ExportColorTexture();
 
         layout.AddView(_selectButton);
         layout.AddView(_renderButton);
         layout.AddView(_copyButton);
+        layout.AddView(_exportButton);
         layout.AddView(_status);
         layout.AddView(scroll);
 
@@ -116,6 +128,26 @@ public class MainActivity : Activity
         StartActivityForResult(intent, PickArchiveRequest);
     }
 
+    private void ExportColorTexture()
+    {
+        if (_colorDds == null)
+        {
+            Toast.MakeText(
+                this,
+                "Load base.scs first.",
+                ToastLength.Short)!.Show();
+
+            return;
+        }
+
+        var intent = new Intent(Intent.ActionCreateDocument);
+        intent.AddCategory(Intent.CategoryOpenable);
+        intent.SetType("application/octet-stream");
+        intent.PutExtra(Intent.ExtraTitle, "daf_xf_color.dds");
+
+        StartActivityForResult(intent, ExportTextureRequest);
+    }
+
     protected override async void OnActivityResult(
         int requestCode,
         Result resultCode,
@@ -123,9 +155,36 @@ public class MainActivity : Activity
     {
         base.OnActivityResult(requestCode, resultCode, data);
 
-        if (requestCode != PickArchiveRequest ||
-            resultCode != Result.Ok ||
-            data?.Data == null)
+        if (resultCode != Result.Ok || data?.Data == null)
+            return;
+
+        if (requestCode == ExportTextureRequest)
+        {
+            try
+            {
+                using var output =
+                    ContentResolver!.OpenOutputStream(data.Data)
+                    ?? throw new IOException("Cannot create output file.");
+
+                await output.WriteAsync(_colorDds!);
+                await output.FlushAsync();
+
+                _status.Text = "COLOR.DDS EXPORTED SUCCESSFULLY";
+
+                Toast.MakeText(
+                    this,
+                    "Original color.dds saved!",
+                    ToastLength.Long)!.Show();
+            }
+            catch (Exception ex)
+            {
+                _status.Text = "EXPORT FAILED\n" + ex.Message;
+            }
+
+            return;
+        }
+
+        if (requestCode != PickArchiveRequest)
             return;
 
         var uri = data.Data;
@@ -133,6 +192,7 @@ public class MainActivity : Activity
         _selectButton.Enabled = false;
         _renderButton.Enabled = false;
         _copyButton.Enabled = false;
+        _exportButton.Enabled = false;
 
         _status.Text = "Reading DAF XF geometry, textures and materials...";
         _report.Text = "";
@@ -158,11 +218,13 @@ public class MainActivity : Activity
                     return files[0];
                 }
 
+                byte[] colorBytes =
+                    Extract("/vehicle/truck/daf_xf/color.dds");
+
                 var model = PmgV20Reader.Read(
                     Extract("/vehicle/truck/daf_xf/truck.pmg"));
 
-                var color = DdsTextureDecoder.Decode(
-                    Extract("/vehicle/truck/daf_xf/color.dds"));
+                var color = DdsTextureDecoder.Decode(colorBytes);
 
                 var glass = DdsTextureDecoder.Decode(
                     Extract("/vehicle/truck/share/glass_ex.dds"));
@@ -276,7 +338,6 @@ public class MainActivity : Activity
                     try
                     {
                         byte[] bytes = Extract(path);
-
                         string materialText =
                             Encoding.UTF8.GetString(bytes);
 
@@ -291,6 +352,7 @@ public class MainActivity : Activity
 
                 report.AppendLine();
                 report.AppendLine("FOUR TEXTURES DECODED SUCCESSFULLY.");
+                report.AppendLine($"Original color.dds size: {colorBytes.Length} bytes");
 
                 return (
                     Model: model,
@@ -298,6 +360,7 @@ public class MainActivity : Activity
                     Glass: glass,
                     Lightmask: lightmask,
                     Environment: environment,
+                    ColorBytes: colorBytes,
                     Report: report.ToString()
                 );
             });
@@ -307,6 +370,7 @@ public class MainActivity : Activity
             _glass = loaded.Glass;
             _lightmask = loaded.Lightmask;
             _environment = loaded.Environment;
+            _colorDds = loaded.ColorBytes;
 
             _diagnosticReport = loaded.Report;
             _report.Text = _diagnosticReport;
@@ -315,6 +379,7 @@ public class MainActivity : Activity
 
             _renderButton.Enabled = true;
             _copyButton.Enabled = true;
+            _exportButton.Enabled = true;
         }
         catch (Exception ex)
         {
