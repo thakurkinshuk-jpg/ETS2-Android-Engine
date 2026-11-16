@@ -23,11 +23,13 @@ public class MainActivity : Activity
     private TextView _report = null!;
     private Button _selectButton = null!;
     private Button _renderButton = null!;
+    private Button _copyButton = null!;
     private ScrollView _scroll = null!;
 
     private GLSurfaceView? _glView;
     private PmgV20Model? _loadedModel;
     private DecodedDdsTexture? _loadedTexture;
+    private string _diagnosticReport = "";
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -57,6 +59,12 @@ public class MainActivity : Activity
             Enabled = false
         };
 
+        _copyButton = new Button(this)
+        {
+            Text = "COPY REPORT",
+            Enabled = false
+        };
+
         _status = new TextView(this)
         {
             Text = "Select your original ETS2 base.scs archive.",
@@ -74,10 +82,12 @@ public class MainActivity : Activity
 
         _selectButton.Click += (_, _) => SelectArchive();
         _renderButton.Click += (_, _) => ShowTruck();
+        _copyButton.Click += (_, _) => CopyReport();
 
         layout.AddView(title);
         layout.AddView(_selectButton);
         layout.AddView(_renderButton);
+        layout.AddView(_copyButton);
         layout.AddView(_status);
         layout.AddView(_scroll);
 
@@ -109,7 +119,10 @@ public class MainActivity : Activity
 
         _selectButton.Enabled = false;
         _renderButton.Enabled = false;
-        _status.Text = "Inspecting PMD materials and loading truck...";
+        _copyButton.Enabled = false;
+
+        _diagnosticReport = "";
+        _status.Text = "Inspecting DAF XF files...";
         _report.Text = "";
 
         try
@@ -160,9 +173,13 @@ public class MainActivity : Activity
             _loadedModel = loaded.Model;
             _loadedTexture = loaded.Texture;
 
-            _report.Text = loaded.Report;
+            _diagnosticReport = loaded.Report;
+            _report.Text = _diagnosticReport;
+
             _status.Text = "DIAGNOSTIC INSPECTION COMPLETED";
+
             _renderButton.Enabled = true;
+            _copyButton.Enabled = true;
         }
         catch (Exception ex)
         {
@@ -172,6 +189,24 @@ public class MainActivity : Activity
 
             _selectButton.Enabled = true;
         }
+    }
+
+    private void CopyReport()
+    {
+        if (string.IsNullOrWhiteSpace(_diagnosticReport))
+            return;
+
+        var clipboard =
+            (ClipboardManager)GetSystemService(ClipboardService)!;
+
+        clipboard.PrimaryClip = ClipData.NewPlainText(
+            "ETS2 DAF XF diagnostic report",
+            _diagnosticReport);
+
+        Toast.MakeText(
+            this,
+            "Diagnostic report copied!",
+            ToastLength.Short)!.Show();
     }
 
     private static string BuildReport(
