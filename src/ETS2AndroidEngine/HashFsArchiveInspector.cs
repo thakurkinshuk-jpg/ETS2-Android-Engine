@@ -1,19 +1,17 @@
 using System;
-using System.Linq;
 using System.Text;
-using System.Collections.Generic;
 using TruckLib.HashFs;
 
 namespace ETS2AndroidEngine;
 
 public static class HashFsArchiveInspector
 {
-    private static readonly string[] TobjPaths =
+    private static readonly string[] TexturePaths =
     {
-        "/vehicle/truck/daf_xf/color.tobj",
-        "/material/environment/vehicle_reflection.tobj",
-        "/vehicle/truck/daf_xf/lightmask.tobj",
-        "/vehicle/truck/share/glass_ex.tobj"
+        "/vehicle/truck/daf_xf/color.dds",
+        "/material/environment/generic_s.dds",
+        "/vehicle/truck/daf_xf/lightmask.dds",
+        "/vehicle/truck/share/glass_ex.dds"
     };
 
     public static string Inspect(Stream archiveStream)
@@ -22,16 +20,16 @@ public static class HashFsArchiveInspector
 
         var result = new StringBuilder();
 
-        result.AppendLine("ETS2 TOBJ INSPECTION");
-        result.AppendLine("-------------------");
+        result.AppendLine("ETS2 DDS TEXTURE INSPECTION");
+        result.AppendLine("--------------------------");
         result.AppendLine($"HashFS Version: {reader.Version}");
         result.AppendLine($"Total entries: {reader.Entries.Count}");
 
-        foreach (string path in TobjPaths)
+        foreach (string path in TexturePaths)
         {
             result.AppendLine();
             result.AppendLine("================================");
-            result.AppendLine("TOBJ: " + path);
+            result.AppendLine(path);
             result.AppendLine("================================");
 
             try
@@ -40,65 +38,62 @@ public static class HashFsArchiveInspector
 
                 if (files.Length == 0)
                 {
-                    result.AppendLine("FILE NOT FOUND");
+                    result.AppendLine("TEXTURE NOT FOUND");
                     continue;
                 }
 
                 byte[] data = files[0];
 
+                result.AppendLine("STATUS: FOUND");
                 result.AppendLine($"File size: {data.Length} bytes");
 
-                result.AppendLine();
-                result.AppendLine("HEX DATA (first 128 bytes):");
-
-                int count = Math.Min(data.Length, 128);
-
-                for (int i = 0; i < count; i += 16)
+                if (data.Length < 128)
                 {
-                    int length = Math.Min(16, count - i);
-
-                    result.Append($"{i:X4}: ");
-
-                    for (int j = 0; j < length; j++)
-                    {
-                        result.Append(data[i + j].ToString("X2"));
-                        result.Append(' ');
-                    }
-
-                    result.AppendLine();
+                    result.AppendLine("ERROR: DDS header is incomplete.");
+                    continue;
                 }
 
-                result.AppendLine();
-                result.AppendLine("PRINTABLE STRINGS:");
+                string magic = Encoding.ASCII.GetString(data, 0, 4);
 
-                string decoded = Encoding.Latin1.GetString(data);
+                result.AppendLine($"Magic: {magic}");
 
-                var strings = new List<string>();
-                var current = new StringBuilder();
-
-                foreach (char c in decoded)
+                if (magic != "DDS ")
                 {
-                    if (c >= 32 && c <= 126)
-                    {
-                        current.Append(c);
-                    }
-                    else
-                    {
-                        if (current.Length >= 4)
-                            strings.Add(current.ToString());
-
-                        current.Clear();
-                    }
+                    result.AppendLine("ERROR: Invalid DDS signature.");
+                    continue;
                 }
 
-                if (current.Length >= 4)
-                    strings.Add(current.ToString());
+                uint headerSize = BitConverter.ToUInt32(data, 4);
+                uint height = BitConverter.ToUInt32(data, 12);
+                uint width = BitConverter.ToUInt32(data, 16);
+                uint mipmaps = BitConverter.ToUInt32(data, 28);
+                uint pixelFormatSize = BitConverter.ToUInt32(data, 76);
+                uint pixelFlags = BitConverter.ToUInt32(data, 80);
 
-                if (strings.Count == 0)
-                    result.AppendLine("(No printable strings found)");
+                string fourCC = Encoding.ASCII.GetString(data, 84, 4);
+
+                uint rgbBits = BitConverter.ToUInt32(data, 88);
+
+                result.AppendLine($"Header size: {headerSize}");
+                result.AppendLine($"Dimensions: {width} x {height}");
+                result.AppendLine($"Mipmaps: {(mipmaps == 0 ? 1 : mipmaps)}");
+                result.AppendLine($"Pixel format size: {pixelFormatSize}");
+                result.AppendLine($"Pixel flags: 0x{pixelFlags:X8}");
+                result.AppendLine($"FourCC: {fourCC}");
+                result.AppendLine($"RGB bit count: {rgbBits}");
+
+                if (fourCC == "DX10")
+                {
+                    result.AppendLine("Extended DX10 header detected.");
+                }
+                else if (!string.IsNullOrWhiteSpace(fourCC))
+                {
+                    result.AppendLine("Compression: " + fourCC);
+                }
                 else
-                    foreach (string value in strings.Distinct())
-                        result.AppendLine(value);
+                {
+                    result.AppendLine("Compression: Uncompressed or RGB format");
+                }
             }
             catch (Exception ex)
             {
@@ -107,7 +102,7 @@ public static class HashFsArchiveInspector
         }
 
         result.AppendLine();
-        result.AppendLine("TOBJ INSPECTION COMPLETED.");
+        result.AppendLine("DDS INSPECTION COMPLETED.");
 
         return result.ToString();
     }
