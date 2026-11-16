@@ -272,7 +272,9 @@ public class MainActivity : Activity
                         texture,
                         BuildMaterialReport(materialData),
                         BuildTobjReport(tobjData),
-                        BuildTextureReport(texturePaths, textureData));
+                        BuildTextureReport(texturePaths, textureData))
+                        + "\n\n"
+                        + UvDiagnostics.Build(model);
 
                     return (
                         Model: model,
