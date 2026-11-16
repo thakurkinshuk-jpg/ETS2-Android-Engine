@@ -12,43 +12,124 @@ public sealed class DafXfRenderer :
 {
     private const string VertexShader = @"
         attribute vec3 aPosition;
+        attribute vec3 aNormal;
         attribute vec2 aTexCoord;
+        attribute vec2 aLightUv;
 
         uniform mat4 uMvp;
+        uniform mat4 uModelView;
 
         varying vec2 vTexCoord;
+        varying vec2 vLightUv;
+        varying vec3 vEyePosition;
+        varying vec3 vEyeNormal;
 
         void main()
         {
+            vec4 eyePosition = uModelView * vec4(aPosition, 1.0);
+
             gl_Position = uMvp * vec4(aPosition, 1.0);
+
             vTexCoord = aTexCoord;
+            vLightUv = aLightUv;
+            vEyePosition = eyePosition.xyz;
+            vEyeNormal = normalize(mat3(uModelView) * aNormal);
         }";
 
     private const string FragmentShader = @"
         precision mediump float;
 
-        uniform vec4 uColor;
         uniform sampler2D uTexture;
-        uniform float uUseTexture;
+        uniform sampler2D uEnvironment;
+        uniform sampler2D uLightmask;
+
         uniform float uIsGlass;
+        uniform float uUseEnvironment;
+        uniform float uUseLamp;
+        uniform float uEnvironmentStrength;
 
         varying vec2 vTexCoord;
+        varying vec2 vLightUv;
+        varying vec3 vEyePosition;
+        varying vec3 vEyeNormal;
+
+        vec2 EnvironmentUv(vec3 direction)
+        {
+            float denominator =
+                2.0 * sqrt(
+                    direction.x * direction.x +
+                    direction.y * direction.y +
+                    (direction.z + 1.0) * (direction.z + 1.0)
+                );
+
+            if (denominator < 0.0001)
+                return vec2(0.5, 0.5);
+
+            return direction.xy / denominator + 0.5;
+        }
 
         void main()
         {
             if (uIsGlass > 0.5)
             {
-                gl_FragColor = vec4(0.62, 0.78, 0.84, 0.22);
+                gl_FragColor =
+                    vec4(0.62, 0.78, 0.84, 0.22);
                 return;
             }
 
-            vec4 texColor = texture2D(uTexture, vTexCoord);
+            vec4 base =
+                texture2D(uTexture, vTexCoord);
 
-            gl_FragColor = mix(
-                uColor,
-                texColor * uColor,
-                uUseTexture
-            );
+            vec3 normal =
+                normalize(vEyeNormal);
+
+            vec3 viewDirection =
+                normalize(-vEyePosition);
+
+            if (uUseLamp > 0.5)
+            {
+                vec4 mask =
+                    texture2D(uLightmask, vLightUv);
+
+                // Approximate lamp-mask contribution.
+                base.rgb += base.rgb * mask.r * 0.65;
+            }
+
+            if (uUseEnvironment > 0.5)
+            {
+                vec3 reflected =
+                    reflect(-viewDirection, normal);
+
+                vec2 reflectionUv =
+                    EnvironmentUv(reflected);
+
+                vec3 environmentColor =
+                    texture2D(
+                        uEnvironment,
+                        reflectionUv
+                    ).rgb;
+
+                float fresnel =
+                    pow(
+                        1.0 - max(
+                            dot(normal, viewDirection),
+                            0.0
+                        ),
+                        2.0
+                    );
+
+                float reflectionAmount =
+                    uEnvironmentStrength *
+                    (0.25 + 0.75 * fresnel);
+
+                base.rgb = mix(
+                    base.rgb,
+                    environmentColor,
+                    clamp(reflectionAmount, 0.0, 0.45)
+                );
+            }
+
+            gl_FragColor = base;
         }";
 
     private readonly PmgV20Model _model;
@@ -62,12 +143,21 @@ public sealed class DafXfRenderer :
 
     private int _program;
     private int _positionHandle;
+    private int _normalHandle;
     private int _texCoordHandle;
+    private int _lightUvHandle;
+
     private int _mvpHandle;
-    private int _colorHandle;
+    private int _modelViewHandle;
+
     private int _textureHandle;
-    private int _useTextureHandle;
+    private int _environmentHandle;
+    private int _lightmaskHandle;
+
     private int _glassHandle;
+    private int _useEnvironmentHandle;
+    private int _useLampHandle;
+    private int _environmentStrengthHandle;
 
     private int _colorGlTexture;
     private int _glassGlTexture;
@@ -89,7 +179,9 @@ public sealed class DafXfRenderer :
     private sealed class PieceBuffer
     {
         public FloatBuffer Vertices = null!;
+        public FloatBuffer Normals = null!;
         public FloatBuffer TexCoords = null!;
+        public FloatBuffer LightUvs = null!;
         public ShortBuffer Indices = null!;
 
         public int IndexCount;
@@ -215,32 +307,44 @@ public sealed class DafXfRenderer :
             FragmentShader);
 
         _positionHandle =
-            GLES20.GlGetAttribLocation(
-                _program, "aPosition");
+            GLES20.GlGetAttribLocation(_program, "aPosition");
+
+        _normalHandle =
+            GLES20.GlGetAttribLocation(_program, "aNormal");
 
         _texCoordHandle =
-            GLES20.GlGetAttribLocation(
-                _program, "aTexCoord");
+            GLES20.GlGetAttribLocation(_program, "aTexCoord");
+
+        _lightUvHandle =
+            GLES20.GlGetAttribLocation(_program, "aLightUv");
 
         _mvpHandle =
-            GLES20.GlGetUniformLocation(
-                _program, "uMvp");
+            GLES20.GlGetUniformLocation(_program, "uMvp");
 
-        _colorHandle =
-            GLES20.GlGetUniformLocation(
-                _program, "uColor");
+        _modelViewHandle =
+            GLES20.GlGetUniformLocation(_program, "uModelView");
 
         _textureHandle =
-            GLES20.GlGetUniformLocation(
-                _program, "uTexture");
+            GLES20.GlGetUniformLocation(_program, "uTexture");
 
-        _useTextureHandle =
-            GLES20.GlGetUniformLocation(
-                _program, "uUseTexture");
+        _environmentHandle =
+            GLES20.GlGetUniformLocation(_program, "uEnvironment");
+
+        _lightmaskHandle =
+            GLES20.GlGetUniformLocation(_program, "uLightmask");
 
         _glassHandle =
+            GLES20.GlGetUniformLocation(_program, "uIsGlass");
+
+        _useEnvironmentHandle =
+            GLES20.GlGetUniformLocation(_program, "uUseEnvironment");
+
+        _useLampHandle =
+            GLES20.GlGetUniformLocation(_program, "uUseLamp");
+
+        _environmentStrengthHandle =
             GLES20.GlGetUniformLocation(
-                _program, "uIsGlass");
+                _program, "uEnvironmentStrength");
 
         BuildBuffers();
 
@@ -260,20 +364,21 @@ public sealed class DafXfRenderer :
                 piece.Indices.Length == 0)
                 continue;
 
-            // Exclude shadow-only and fake-shadow materials.
+            // Shadow-only and fake-shadow materials.
             if (piece.MaterialIndex == 1 ||
                 piece.MaterialIndex == 5)
                 continue;
 
-            var positions =
-                new float[piece.Vertices.Length * 3];
+            int count = piece.Vertices.Length;
 
-            var texCoords =
-                new float[piece.Vertices.Length * 2];
+            var positions = new float[count * 3];
+            var normals = new float[count * 3];
+            var texCoords = new float[count * 2];
+            var lightUvs = new float[count * 2];
 
             bool hasUv = piece.TexCoordWidth > 0;
 
-            for (int i = 0; i < piece.Vertices.Length; i++)
+            for (int i = 0; i < count; i++)
             {
                 var vertex = piece.Vertices[i];
                 var p = vertex.Position;
@@ -281,6 +386,17 @@ public sealed class DafXfRenderer :
                 positions[i * 3] = p.X;
                 positions[i * 3 + 1] = p.Y;
                 positions[i * 3 + 2] = p.Z;
+
+                if (vertex.HasNormal)
+                {
+                    normals[i * 3] = vertex.Normal.X;
+                    normals[i * 3 + 1] = vertex.Normal.Y;
+                    normals[i * 3 + 2] = vertex.Normal.Z;
+                }
+                else
+                {
+                    normals[i * 3 + 2] = 1f;
+                }
 
                 if (vertex.TextureCoordinates.Length > 0)
                 {
@@ -293,10 +409,24 @@ public sealed class DafXfRenderer :
                 {
                     hasUv = false;
                 }
+
+                // The lamp shader's second UV channel is used
+                // for its lightmask texture.
+                if (vertex.TextureCoordinates.Length > 1)
+                {
+                    var uv1 = vertex.TextureCoordinates[1];
+
+                    lightUvs[i * 2] = uv1.X;
+                    lightUvs[i * 2 + 1] = 1f - uv1.Y;
+                }
+                else
+                {
+                    lightUvs[i * 2] = texCoords[i * 2];
+                    lightUvs[i * 2 + 1] = texCoords[i * 2 + 1];
+                }
             }
 
-            var indexData =
-                new short[piece.Indices.Length];
+            var indexData = new short[piece.Indices.Length];
 
             for (int i = 0; i < piece.Indices.Length; i++)
             {
@@ -312,6 +442,14 @@ public sealed class DafXfRenderer :
             vertexBuffer.Put(positions);
             vertexBuffer.Position(0);
 
+            var normalBuffer = ByteBuffer
+                .AllocateDirect(normals.Length * 4)
+                .Order(ByteOrder.NativeOrder()!)
+                .AsFloatBuffer();
+
+            normalBuffer.Put(normals);
+            normalBuffer.Position(0);
+
             var uvBuffer = ByteBuffer
                 .AllocateDirect(texCoords.Length * 4)
                 .Order(ByteOrder.NativeOrder()!)
@@ -319,6 +457,14 @@ public sealed class DafXfRenderer :
 
             uvBuffer.Put(texCoords);
             uvBuffer.Position(0);
+
+            var lightUvBuffer = ByteBuffer
+                .AllocateDirect(lightUvs.Length * 4)
+                .Order(ByteOrder.NativeOrder()!)
+                .AsFloatBuffer();
+
+            lightUvBuffer.Put(lightUvs);
+            lightUvBuffer.Position(0);
 
             var indexBuffer = ByteBuffer
                 .AllocateDirect(indexData.Length * 2)
@@ -331,7 +477,9 @@ public sealed class DafXfRenderer :
             _buffers.Add(new PieceBuffer
             {
                 Vertices = vertexBuffer,
+                Normals = normalBuffer,
                 TexCoords = uvBuffer,
+                LightUvs = lightUvBuffer,
                 Indices = indexBuffer,
                 IndexCount = indexData.Length,
                 MaterialIndex = piece.MaterialIndex,
@@ -409,8 +557,7 @@ public sealed class DafXfRenderer :
         if (height <= 0)
             height = 1;
 
-        GLES20.GlViewport(
-            0, 0, width, height);
+        GLES20.GlViewport(0, 0, width, height);
 
         Matrix.PerspectiveM(
             _projection,
@@ -439,8 +586,7 @@ public sealed class DafXfRenderer :
 
         _rotation += 0.35f;
 
-        Matrix.SetIdentityM(
-            _modelMatrix, 0);
+        Matrix.SetIdentityM(_modelMatrix, 0);
 
         Matrix.RotateM(
             _modelMatrix,
@@ -473,172 +619,102 @@ public sealed class DafXfRenderer :
         GLES20.GlUseProgram(_program);
 
         GLES20.GlUniformMatrix4fv(
-            _mvpHandle,
-            1,
-            false,
-            _mvp,
-            0);
+            _mvpHandle, 1, false, _mvp, 0);
 
-        GLES20.GlUniform1i(
-            _textureHandle,
-            0);
+        GLES20.GlUniformMatrix4fv(
+            _modelViewHandle, 1, false, _mv, 0);
 
-        GLES20.GlEnableVertexAttribArray(
-            _positionHandle);
+        GLES20.GlUniform1i(_textureHandle, 0);
+        GLES20.GlUniform1i(_environmentHandle, 1);
+        GLES20.GlUniform1i(_lightmaskHandle, 2);
 
-        GLES20.GlEnableVertexAttribArray(
-            _texCoordHandle);
+        GLES20.GlActiveTexture(GLES20.GlTexture1);
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d,
+            _environmentGlTexture);
+
+        GLES20.GlActiveTexture(GLES20.GlTexture2);
+        GLES20.GlBindTexture(
+            GLES20.GlTexture2d,
+            _lightmaskGlTexture);
+
+        GLES20.GlActiveTexture(GLES20.GlTexture0);
+
+        GLES20.GlEnableVertexAttribArray(_positionHandle);
+        GLES20.GlEnableVertexAttribArray(_normalHandle);
+        GLES20.GlEnableVertexAttribArray(_texCoordHandle);
+        GLES20.GlEnableVertexAttribArray(_lightUvHandle);
 
         foreach (var piece in _buffers)
         {
             piece.Vertices.Position(0);
+            piece.Normals.Position(0);
             piece.TexCoords.Position(0);
+            piece.LightUvs.Position(0);
             piece.Indices.Position(0);
 
             GLES20.GlVertexAttribPointer(
-                _positionHandle,
-                3,
-                GLES20.GlFloat,
-                false,
-                0,
+                _positionHandle, 3,
+                GLES20.GlFloat, false, 0,
                 piece.Vertices);
 
             GLES20.GlVertexAttribPointer(
-                _texCoordHandle,
-                2,
-                GLES20.GlFloat,
-                false,
-                0,
+                _normalHandle, 3,
+                GLES20.GlFloat, false, 0,
+                piece.Normals);
+
+            GLES20.GlVertexAttribPointer(
+                _texCoordHandle, 2,
+                GLES20.GlFloat, false, 0,
                 piece.TexCoords);
 
-            bool isGlass = piece.MaterialIndex == 8;
+            GLES20.GlVertexAttribPointer(
+                _lightUvHandle, 2,
+                GLES20.GlFloat, false, 0,
+                piece.LightUvs);
+
+            int material = piece.MaterialIndex;
+
+            bool isGlass = material == 8;
+            bool isLamp = material == 6;
+
+            bool usesEnvironment =
+                material == 3 ||
+                material == 4 ||
+                material == 6 ||
+                material == 7;
+
+            float environmentStrength = 0f;
+
+            if (material == 3)
+                environmentStrength = 0.336f;
+            else if (material == 4)
+                environmentStrength = 0.141f;
+            else if (material == 6)
+                environmentStrength = 0.12f;
+            else if (material == 7)
+                environmentStrength = 0.087f;
 
             int selectedTexture = isGlass
                 ? _glassGlTexture
                 : _colorGlTexture;
 
-            GLES20.GlActiveTexture(
-                GLES20.GlTexture0);
+            GLES20.GlActiveTexture(GLES20.GlTexture0);
 
             GLES20.GlBindTexture(
                 GLES20.GlTexture2d,
                 selectedTexture);
 
-            GLES20.GlUniform4f(
-                _colorHandle,
-                1f, 1f, 1f, 1f);
-
-            GLES20.GlUniform1f(
-                _useTextureHandle,
-                piece.HasTextureCoordinates ? 1f : 0f);
-
             GLES20.GlUniform1f(
                 _glassHandle,
                 isGlass ? 1f : 0f);
 
-            if (isGlass)
-            {
-                GLES20.GlEnable(GLES20.GlBlend);
+            GLES20.GlUniform1f(
+                _useEnvironmentHandle,
+                usesEnvironment ? 1f : 0f);
 
-                GLES20.GlBlendFunc(
-                    GLES20.GlSrcAlpha,
-                    GLES20.GlOneMinusSrcAlpha);
+            GLES20.GlUniform1f(
+                _useLampHandle,
+                isLamp ? 1f : 0f);
 
-                GLES20.GlDepthMask(false);
-            }
-
-            GLES20.GlDrawElements(
-                GLES20.GlTriangles,
-                piece.IndexCount,
-                GLES20.GlUnsignedShort,
-                piece.Indices);
-
-            if (isGlass)
-            {
-                GLES20.GlDepthMask(true);
-                GLES20.GlDisable(GLES20.GlBlend);
-            }
-        }
-
-        GLES20.GlDisableVertexAttribArray(
-            _positionHandle);
-
-        GLES20.GlDisableVertexAttribArray(
-            _texCoordHandle);
-
-        GLES20.GlBindTexture(
-            GLES20.GlTexture2d,
-            0);
-    }
-
-    private static int CreateProgram(
-        string vertexSource,
-        string fragmentSource)
-    {
-        int vertex = CompileShader(
-            GLES20.GlVertexShader,
-            vertexSource);
-
-        int fragment = CompileShader(
-            GLES20.GlFragmentShader,
-            fragmentSource);
-
-        int program = GLES20.GlCreateProgram();
-
-        GLES20.GlAttachShader(program, vertex);
-        GLES20.GlAttachShader(program, fragment);
-
-        GLES20.GlLinkProgram(program);
-
-        var status = new int[1];
-
-        GLES20.GlGetProgramiv(
-            program,
-            GLES20.GlLinkStatus,
-            status,
-            0);
-
-        if (status[0] == 0)
-        {
-            string error =
-                GLES20.GlGetProgramInfoLog(program);
-
-            throw new InvalidOperationException(
-                "OpenGL program link failed: " + error);
-        }
-
-        GLES20.GlDeleteShader(vertex);
-        GLES20.GlDeleteShader(fragment);
-
-        return program;
-    }
-
-    private static int CompileShader(
-        int type,
-        string source)
-    {
-        int shader = GLES20.GlCreateShader(type);
-
-        GLES20.GlShaderSource(shader, source);
-        GLES20.GlCompileShader(shader);
-
-        var status = new int[1];
-
-        GLES20.GlGetShaderiv(
-            shader,
-            GLES20.GlCompileStatus,
-            status,
-            0);
-
-        if (status[0] == 0)
-        {
-            string error =
-                GLES20.GlGetShaderInfoLog(shader);
-
-            throw new InvalidOperationException(
-                "OpenGL shader compilation failed: " + error);
-        }
-
-        return shader;
-    }
-}
+            GLES20.GlU
