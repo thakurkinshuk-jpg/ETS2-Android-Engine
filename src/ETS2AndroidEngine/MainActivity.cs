@@ -16,13 +16,14 @@ namespace ETS2AndroidEngine;
 [Activity(Label = "ETS2 Android Engine", MainLauncher = true, Exported = true)]
 public class MainActivity : Activity
 {
-    private const int PickArchiveRequest = 1001;
+    private const int PickBaseRequest = 1001;
     private const int ExportTextureRequest = 1002;
+    private const int PickDefRequest = 1003;
 
     private TextView _status = null!;
     private TextView _report = null!;
-
     private Button _selectButton = null!;
+    private Button _selectDefButton = null!;
     private Button _renderButton = null!;
     private Button _copyButton = null!;
     private Button _exportButton = null!;
@@ -33,11 +34,10 @@ public class MainActivity : Activity
     private DecodedDdsTexture? _glass;
     private DecodedDdsTexture? _lightmask;
     private DecodedDdsTexture? _environment;
-
     private byte[]? _colorDds;
 
     private Android.Net.Uri? _archiveUri;
-
+    private Android.Net.Uri? _defArchiveUri;
     private GLSurfaceView? _glView;
     private string _diagnosticReport = "";
 
@@ -63,7 +63,6 @@ public class MainActivity : Activity
         {
             Orientation = Orientation.Vertical
         };
-
         layout.SetPadding(20, 20, 20, 20);
 
         layout.AddView(new TextView(this)
@@ -74,7 +73,12 @@ public class MainActivity : Activity
 
         _selectButton = new Button(this)
         {
-            Text = "SELECT ETS2 BASE.SCS"
+            Text = "SELECT BASE.SCS"
+        };
+
+        _selectDefButton = new Button(this)
+        {
+            Text = "SELECT DEF.SCS"
         };
 
         _renderButton = new Button(this)
@@ -85,7 +89,7 @@ public class MainActivity : Activity
 
         _copyButton = new Button(this)
         {
-            Text = "COPY FULL MATERIAL REPORT",
+            Text = "COPY FULL REPORT",
             Enabled = false
         };
 
@@ -97,32 +101,34 @@ public class MainActivity : Activity
 
         _scanButton = new Button(this)
         {
-            Text = "SCAN DAF PAINTJOB FILES",
+            Text = "SCAN DEF.SCS PAINTJOB DATA",
             Enabled = false
         };
 
         _status = new TextView(this)
         {
-            Text = "Select your original ETS2 base.scs archive.",
+            Text = "Select base.scs and then select def.scs.",
             TextSize = 15
         };
 
         _report = new TextView(this)
         {
-            Text = "Model, textures and material definitions will appear here.",
+            Text = "Model, textures, materials and paintjob definitions will appear here.",
             TextSize = 12
         };
 
         var scroll = new ScrollView(this);
         scroll.AddView(_report);
 
-        _selectButton.Click += (_, _) => SelectArchive();
+        _selectButton.Click += (_, _) => SelectArchive(PickBaseRequest);
+        _selectDefButton.Click += (_, _) => SelectArchive(PickDefRequest);
         _renderButton.Click += (_, _) => ShowTruck();
         _copyButton.Click += (_, _) => CopyReport();
         _exportButton.Click += (_, _) => ExportColorTexture();
         _scanButton.Click += (_, _) => ScanPaintAssets();
 
         layout.AddView(_selectButton);
+        layout.AddView(_selectDefButton);
         layout.AddView(_renderButton);
         layout.AddView(_copyButton);
         layout.AddView(_exportButton);
@@ -133,13 +139,12 @@ public class MainActivity : Activity
         SetContentView(layout);
     }
 
-    private void SelectArchive()
+    private void SelectArchive(int requestCode)
     {
         var intent = new Intent(Intent.ActionOpenDocument);
         intent.AddCategory(Intent.CategoryOpenable);
         intent.SetType("*/*");
-
-        StartActivityForResult(intent, PickArchiveRequest);
+        StartActivityForResult(intent, requestCode);
     }
 
     private void ExportColorTexture()
@@ -147,10 +152,7 @@ public class MainActivity : Activity
         if (_colorDds == null)
         {
             Toast.MakeText(
-                this,
-                "Load base.scs first.",
-                ToastLength.Short)!.Show();
-
+                this, "Load base.scs first.", ToastLength.Short)!.Show();
             return;
         }
 
@@ -158,7 +160,6 @@ public class MainActivity : Activity
         intent.AddCategory(Intent.CategoryOpenable);
         intent.SetType("application/octet-stream");
         intent.PutExtra(Intent.ExtraTitle, "daf_xf_color.dds");
-
         StartActivityForResult(intent, ExportTextureRequest);
     }
 
@@ -186,31 +187,37 @@ public class MainActivity : Activity
                 _status.Text = "COLOR.DDS EXPORTED SUCCESSFULLY";
 
                 Toast.MakeText(
-                    this,
-                    "Original color.dds saved!",
+                    this, "Original color.dds saved!",
                     ToastLength.Long)!.Show();
             }
             catch (Exception ex)
             {
                 _status.Text = "EXPORT FAILED\n" + ex.Message;
             }
-
             return;
         }
 
-        if (requestCode != PickArchiveRequest)
+        if (requestCode == PickDefRequest)
+        {
+            _defArchiveUri = data.Data;
+            _scanButton.Enabled = true;
+            _status.Text =
+                "DEF.SCS selected. Tap SCAN DEF.SCS PAINTJOB DATA.";
+
+            Toast.MakeText(
+                this, "def.scs selected.", ToastLength.Short)!.Show();
+            return;
+        }
+
+        if (requestCode != PickBaseRequest)
             return;
 
         var uri = data.Data;
         _archiveUri = uri;
 
-        _selectButton.Enabled = false;
-        _renderButton.Enabled = false;
-        _copyButton.Enabled = false;
-        _exportButton.Enabled = false;
-        _scanButton.Enabled = false;
-
-        _status.Text = "Reading DAF XF geometry, textures and materials...";
+        SetBusy(true);
+        _status.Text =
+            "Reading DAF XF geometry, textures and materials...";
         _report.Text = "";
 
         try
@@ -219,7 +226,7 @@ public class MainActivity : Activity
             {
                 using var input =
                     ContentResolver!.OpenInputStream(uri)
-                    ?? throw new IOException("Cannot open archive.");
+                    ?? throw new IOException("Cannot open base.scs.");
 
                 using var reader = HashFsReader.Open(input);
 
@@ -262,21 +269,18 @@ public class MainActivity : Activity
                 report.AppendLine();
                 report.AppendLine($"COLOR: {color.Width} x {color.Height}");
                 report.AppendLine($"GLASS: {glass.Width} x {glass.Height}");
-                report.AppendLine($"LIGHTMASK: {lightmask.Width} x {lightmask.Height}");
-                report.AppendLine($"ENVIRONMENT: {environment.Width} x {environment.Height}");
+                report.AppendLine(
+                    $"LIGHTMASK: {lightmask.Width} x {lightmask.Height}");
+                report.AppendLine(
+                    $"ENVIRONMENT: {environment.Width} x {environment.Height}");
 
                 report.AppendLine();
                 report.AppendLine("MATERIAL COUNTS");
 
                 for (int material = 0; material <= 9; material++)
                 {
-                    int count = 0;
-
-                    foreach (var piece in model.Pieces)
-                    {
-                        if (piece.MaterialIndex == material)
-                            count++;
-                    }
+                    int count = model.Pieces.Count(
+                        p => p.MaterialIndex == material);
 
                     report.AppendLine(
                         $"Material {material}: {count} pieces");
@@ -290,11 +294,9 @@ public class MainActivity : Activity
                     report.AppendLine();
                     report.AppendLine($"MATERIAL {material}");
 
-                    foreach (var piece in model.Pieces)
+                    foreach (var piece in model.Pieces.Where(
+                        p => p.MaterialIndex == material))
                     {
-                        if (piece.MaterialIndex != material)
-                            continue;
-
                         report.AppendLine(
                             $"Piece {piece.Index}: vertices={piece.VertexCount}, UV channels={piece.TexCoordWidth}");
 
@@ -306,7 +308,6 @@ public class MainActivity : Activity
                             float maxU = float.MinValue;
                             float minV = float.MaxValue;
                             float maxV = float.MinValue;
-
                             int valid = 0;
 
                             foreach (var vertex in piece.Vertices)
@@ -316,10 +317,8 @@ public class MainActivity : Activity
 
                                 var uv = vertex.TextureCoordinates[channel];
 
-                                if (float.IsNaN(uv.X) ||
-                                    float.IsNaN(uv.Y) ||
-                                    float.IsInfinity(uv.X) ||
-                                    float.IsInfinity(uv.Y))
+                                if (!float.IsFinite(uv.X) ||
+                                    !float.IsFinite(uv.Y))
                                     continue;
 
                                 minU = Math.Min(minU, uv.X);
@@ -353,11 +352,8 @@ public class MainActivity : Activity
 
                     try
                     {
-                        byte[] bytes = Extract(path);
-                        string materialText =
-                            Encoding.UTF8.GetString(bytes);
-
-                        report.AppendLine(materialText);
+                        report.AppendLine(
+                            Encoding.UTF8.GetString(Extract(path)));
                     }
                     catch (Exception ex)
                     {
@@ -368,7 +364,8 @@ public class MainActivity : Activity
 
                 report.AppendLine();
                 report.AppendLine("FOUR TEXTURES DECODED SUCCESSFULLY.");
-                report.AppendLine($"Original color.dds size: {colorBytes.Length} bytes");
+                report.AppendLine(
+                    $"Original color.dds size: {colorBytes.Length} bytes");
 
                 return (
                     Model: model,
@@ -390,38 +387,49 @@ public class MainActivity : Activity
 
             _diagnosticReport = loaded.Report;
             _report.Text = _diagnosticReport;
-
-            _status.Text = "MODEL, TEXTURES AND MATERIALS ANALYZED";
+            _status.Text =
+                "BASE.SCS MODEL, TEXTURES AND MATERIALS LOADED";
 
             _renderButton.Enabled = true;
             _copyButton.Enabled = true;
             _exportButton.Enabled = true;
-            _scanButton.Enabled = true;
         }
         catch (Exception ex)
         {
-            _status.Text = "LOADING FAILED\n" + ex.Message;
+            _status.Text = "BASE.SCS LOADING FAILED\n" + ex.Message;
         }
         finally
         {
-            _selectButton.Enabled = true;
+            SetBusy(false);
+            _scanButton.Enabled = _defArchiveUri != null;
         }
+    }
+
+    private void SetBusy(bool busy)
+    {
+        _selectButton.Enabled = !busy;
+        _selectDefButton.Enabled = !busy;
+        _renderButton.Enabled = !busy && _model != null;
+        _copyButton.Enabled =
+            !busy && !string.IsNullOrWhiteSpace(_diagnosticReport);
+        _exportButton.Enabled = !busy && _colorDds != null;
+        _scanButton.Enabled = !busy && _defArchiveUri != null;
     }
 
     private async void ScanPaintAssets()
     {
-        if (_archiveUri == null)
+        if (_defArchiveUri == null)
+        {
+            Toast.MakeText(
+                this, "Select def.scs first.", ToastLength.Short)!.Show();
             return;
+        }
 
-        var uri = _archiveUri;
+        var uri = _defArchiveUri;
+        SetBusy(true);
 
-        _selectButton.Enabled = false;
-        _renderButton.Enabled = false;
-        _copyButton.Enabled = false;
-        _exportButton.Enabled = false;
-        _scanButton.Enabled = false;
-
-        _status.Text = "Scanning base.scs for DAF paintjob files...";
+        _status.Text =
+            "Scanning def.scs truck and paintjob definitions...";
 
         try
         {
@@ -429,19 +437,15 @@ public class MainActivity : Activity
             {
                 using var input =
                     ContentResolver!.OpenInputStream(uri)
-                    ?? throw new IOException("Cannot reopen base.scs.");
+                    ?? throw new IOException("Cannot reopen def.scs.");
 
                 using var reader = HashFsReader.Open(input);
-
                 return BuildPaintAssetReport(reader);
             });
 
-            _diagnosticReport +=
-                "\n\n" + scanReport;
-
+            _diagnosticReport += "\n\n" + scanReport;
             _report.Text = _diagnosticReport;
-
-            _status.Text = "PAINTJOB ASSET SCAN FINISHED";
+            _status.Text = "DEF.SCS PAINTJOB SCAN FINISHED";
 
             Toast.MakeText(
                 this,
@@ -450,129 +454,114 @@ public class MainActivity : Activity
         }
         catch (Exception ex)
         {
-            _status.Text = "PAINTJOB SCAN FAILED\n" + ex.Message;
+            _status.Text = "DEF.SCS SCAN FAILED\n" + ex.Message;
         }
         finally
         {
-            _selectButton.Enabled = true;
-            _renderButton.Enabled = _model != null;
-            _copyButton.Enabled = !string.IsNullOrWhiteSpace(_diagnosticReport);
-            _exportButton.Enabled = _colorDds != null;
-            _scanButton.Enabled = _archiveUri != null;
+            SetBusy(false);
         }
     }
 
-    private static string BuildPaintAssetReport(
-        IHashFsReader reader)
+    private static string BuildPaintAssetReport(IHashFsReader reader)
     {
         var report = new StringBuilder();
 
-        report.AppendLine("DAF XF PAINTJOB ASSET SCAN");
-        report.AppendLine("==========================");
-
+        report.AppendLine("DAF XF PAINTJOB DEFINITION SCAN");
+        report.AppendLine("===============================");
+        report.AppendLine($"HashFS version: {reader.Version}");
         report.AppendLine(
-            "Searching DAF vehicle assets and truck definition directories.");
+            "Scanning truck definitions, paint_job folders and truck configurations.");
 
         var roots = new[]
         {
             "/def/vehicle/truck/",
-            "/vehicle/truck/daf_xf/",
-            "/def/vehicle/truck/daf_xf/"
+            "/def/vehicle/truck_dealer/",
+            "/def/vehicle/truck_dealer_uk/",
+            "/def/vehicle/truck_desktop/",
+            "/def/vehicle/truck_desktop_uk/",
+            "/def/vehicle/truck_company/",
+            "/def/vehicle/truck_company_uk/",
+            "/def/vehicle/truck_used/",
+            "/def/vehicle/truck_used_uk/"
         };
 
         var pending = new Stack<(string Path, int Depth)>();
+        int rootsFound = 0;
 
         foreach (string root in roots)
-            pending.Push((root, 0));
+        {
+            if (reader.EntryExists(root) == EntryType.Directory)
+            {
+                pending.Push((root, 0));
+                rootsFound++;
+            }
+            else
+            {
+                report.AppendLine("ROOT NOT FOUND: " + root);
+            }
+        }
 
-        var visitedDirectories =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
 
-        var candidateFiles =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var candidates = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
 
         int directoriesScanned = 0;
         int directoryErrors = 0;
 
-        const int MaxDirectories = 4000;
-        const int MaxDepth = 10;
-        const int MaxFilesToDisplay = 350;
+        const int maxDirectories = 6000;
+        const int maxDepth = 14;
+        const int maxTextFiles = 300;
 
         while (pending.Count > 0 &&
-               directoriesScanned < MaxDirectories)
+               directoriesScanned < maxDirectories)
         {
             var current = pending.Pop();
+            string directory = current.Path.TrimEnd('/') + "/";
 
-            string directoryPath =
-                current.Path.TrimEnd('/') + "/";
-
-            if (!visitedDirectories.Add(directoryPath))
+            if (!visited.Add(directory))
                 continue;
 
             try
             {
                 var listing = reader.GetDirectoryListing(
-                    directoryPath,
-                    false,
-                    true);
+                    directory, false, true);
 
                 directoriesScanned++;
 
                 foreach (string file in listing.Files)
                 {
-                    string fullPath =
-                        ResolveArchivePath(directoryPath, file);
+                    string path = ResolveArchivePath(directory, file);
+                    string lower = path.ToLowerInvariant();
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
 
-                    string extension =
-                        Path.GetExtension(fullPath).ToLowerInvariant();
+                    bool wantedExt =
+                        ext == ".sii" ||
+                        ext == ".sui" ||
+                        ext == ".mat" ||
+                        ext == ".tobj" ||
+                        ext == ".dds";
 
-                    bool usefulExtension =
-                        extension == ".sii" ||
-                        extension == ".sui" ||
-                        extension == ".mat" ||
-                        extension == ".tobj" ||
-                        extension == ".dds";
+                    bool relevantPath =
+                        lower.Contains("daf") ||
+                        lower.Contains("paint_job") ||
+                        lower.Contains("paintjob");
 
-                    bool isDafAsset =
-                        fullPath.StartsWith(
-                            "/vehicle/truck/daf_xf/",
-                            StringComparison.OrdinalIgnoreCase);
-
-                    bool isTruckDefinition =
-                        fullPath.StartsWith(
-                            "/def/vehicle/truck/",
-                            StringComparison.OrdinalIgnoreCase);
-
-                    bool mentionsDafOrPaint =
-                        fullPath.IndexOf(
-                            "daf",
-                            StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        fullPath.IndexOf(
-                            "paint",
-                            StringComparison.OrdinalIgnoreCase) >= 0;
-
-                    if (usefulExtension &&
-                        (isDafAsset || (isTruckDefinition && mentionsDafOrPaint)))
-                    {
-                        candidateFiles.Add(fullPath);
-                    }
+                    if (wantedExt && relevantPath)
+                        candidates.Add(path);
                 }
 
-                if (current.Depth >= MaxDepth)
+                if (current.Depth >= maxDepth)
                     continue;
 
-                foreach (string subdirectory in listing.Subdirectories)
+                foreach (string child in listing.Subdirectories)
                 {
-                    string fullDirectory =
-                        ResolveArchivePath(directoryPath, subdirectory)
-                        .TrimEnd('/') + "/";
+                    string path = ResolveArchivePath(
+                        directory, child).TrimEnd('/') + "/";
 
-                    if (!visitedDirectories.Contains(fullDirectory))
-                    {
-                        pending.Push((
-                            fullDirectory,
-                            current.Depth + 1));
-                    }
+                    if (!visited.Contains(path))
+                        pending.Push((path, current.Depth + 1));
                 }
             }
             catch
@@ -582,127 +571,195 @@ public class MainActivity : Activity
         }
 
         report.AppendLine();
-        report.AppendLine($"Directories scanned: {directoriesScanned}");
-        report.AppendLine($"Directory listing errors: {directoryErrors}");
-        report.AppendLine($"Candidate files found: {candidateFiles.Count}");
+        report.AppendLine(
+            $"Definition roots found: {rootsFound} / {roots.Length}");
+        report.AppendLine(
+            $"Directories scanned: {directoriesScanned}");
+        report.AppendLine(
+            $"Directory listing errors: {directoryErrors}");
+        report.AppendLine(
+            $"Candidate DAF/paintjob files: {candidates.Count}");
 
         report.AppendLine();
-        report.AppendLine("CANDIDATE FILE PATHS");
-        report.AppendLine("-------------------");
+        report.AppendLine("CANDIDATE DEFINITION AND RESOURCE PATHS");
+        report.AppendLine("---------------------------------------");
 
-        var orderedFiles = candidateFiles
-            .OrderBy(
-                path => path,
-                StringComparer.OrdinalIgnoreCase)
+        var ordered = candidates
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        int displayed = 0;
-
-        foreach (string path in orderedFiles)
-        {
-            if (displayed >= MaxFilesToDisplay)
-                break;
-
+        foreach (string path in ordered)
             report.AppendLine(path);
-            displayed++;
-        }
 
-        if (candidateFiles.Count > MaxFilesToDisplay)
+        report.AppendLine();
+        report.AppendLine("PAINTJOB / TEXTURE REFERENCES");
+        report.AppendLine("-----------------------------");
+
+        int inspected = 0;
+        int matching = 0;
+
+        string[] extensions = { ".sii", ".sui", ".mat" };
+
+        string[] needles =
         {
-            report.AppendLine();
-            report.AppendLine(
-                $"Output limited to {MaxFilesToDisplay} paths.");
+            "paint",
+            "texture",
+            "mask",
+            "alternate_uvset",
+            "base_texture_override",
+            "data_path",
+            "daf",
+            ".tobj",
+            ".dds",
+            "/vehicle/truck/upgrade/paintjob",
+            "/material/ui/accessory"
+        };
+
+        foreach (string path in ordered)
+        {
+            
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
+
+                    bool wantedExt =
+                        ext == ".sii" ||
+                        ext == ".sui" ||
+                        ext == ".mat" ||
+                        ext == ".tobj" ||
+                        ext == ".dds";
+
+                    bool relevantPath =
+                        lower.Contains("daf") ||
+                        lower.Contains("paint_job") ||
+                        lower.Contains("paintjob");
+
+                    if (wantedExt && relevantPath)
+                        candidates.Add(path);
+                }
+
+                if (current.Depth >= maxDepth)
+                    continue;
+
+                foreach (string child in listing.Subdirectories)
+                {
+                    string path = ResolveArchivePath(
+                        directory, child).TrimEnd('/') + "/";
+
+                    if (!visited.Contains(path))
+                        pending.Push((path, current.Depth + 1));
+                }
+            }
+            catch
+            {
+                directoryErrors++;
+            }
         }
 
         report.AppendLine();
-        report.AppendLine("PAINT / TEXTURE REFERENCES IN TEXT FILES");
-        report.AppendLine("----------------------------------------");
+        report.AppendLine($"Definition roots found: {rootsFound} / {roots.Length}");
+        report.AppendLine($"Directories scanned: {directoriesScanned}");
+        report.AppendLine($"Directory listing errors: {directoryErrors}");
+        report.AppendLine($"Candidate DAF/paintjob files: {candidates.Count}");
 
-        int textFilesRead = 0;
-        int matchingTextFiles = 0;
+        report.AppendLine();
+        report.AppendLine("CANDIDATE DEFINITION AND RESOURCE PATHS");
+        report.AppendLine("---------------------------------------");
 
-        foreach (string path in orderedFiles)
+        var ordered = candidates
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (string path in ordered)
+            report.AppendLine(path);
+
+        report.AppendLine();
+        report.AppendLine("PAINTJOB / TEXTURE REFERENCES");
+        report.AppendLine("-----------------------------");
+
+        int inspected = 0;
+        int matching = 0;
+
+        string[] extensions = { ".sii", ".sui", ".mat" };
+
+        string[] needles =
         {
-            string extension =
-                Path.GetExtension(path).ToLowerInvariant();
+            "paint",
+            "texture",
+            "mask",
+            "alternate_uvset",
+            "base_texture_override",
+            "data_path",
+            "daf",
+            ".tobj",
+            ".dds",
+            "/vehicle/truck/upgrade/paintjob",
+            "/material/ui/accessory"
+        };
 
-            
-            if (extension != ".sii" &&
-                extension != ".sui" &&
-                extension != ".mat")
+        foreach (string path in ordered)
+        {
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+
+            if (!extensions.Contains(ext))
                 continue;
 
-            if (textFilesRead >= 120)
+            if (inspected >= maxTextFiles)
                 break;
 
-            textFilesRead++;
+            inspected++;
 
             try
             {
-                var extracted = reader.Extract(path);
+                byte[][] files = reader.Extract(path);
 
-                if (extracted.Length == 0)
+                if (files.Length == 0)
                     continue;
 
-                string content =
-                    Encoding.UTF8.GetString(extracted[0]);
-
-                var matchingLines = new List<string>();
+                string content = Encoding.UTF8.GetString(files[0]);
+                var lines = new List<string>();
 
                 foreach (string line in content.Split('\n'))
                 {
-                    bool relevant =
-                        line.IndexOf("paint", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        line.IndexOf("texture", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        line.IndexOf("daf", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        line.IndexOf("truck", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        line.IndexOf("accessory", StringComparison.OrdinalIgnoreCase) >= 0;
+                    string lower = line.ToLowerInvariant();
 
-                    if (relevant)
-                    {
-                        string trimmed = line.Trim();
+                    if (!needles.Any(n => lower.Contains(n)))
+                        continue;
 
-                        if (trimmed.Length > 220)
-                            trimmed = trimmed.Substring(0, 220);
+                    string value = line.Trim();
 
-                        matchingLines.Add(trimmed);
+                    if (value.Length > 260)
+                        value = value.Substring(0, 260);
 
-                        if (matchingLines.Count >= 12)
-                            break;
-                    }
+                    if (!string.IsNullOrWhiteSpace(value))
+                        lines.Add(value);
+
+                    if (lines.Count >= 24)
+                        break;
                 }
 
-                if (matchingLines.Count == 0)
+                if (lines.Count == 0)
                     continue;
 
-                matchingTextFiles++;
-
+                matching++;
                 report.AppendLine();
                 report.AppendLine("FILE: " + path);
 
-                foreach (string line in matchingLines)
+                foreach (string line in lines)
                     report.AppendLine("  " + line);
             }
             catch (Exception ex)
             {
                 report.AppendLine();
                 report.AppendLine(
-                    "TEXT READ ERROR: " + path + " : " + ex.Message);
+                    "READ ERROR: " + path + " : " + ex.Message);
             }
         }
 
         report.AppendLine();
-        report.AppendLine($"Text files inspected: {textFilesRead}");
-        report.AppendLine($"Files with relevant references: {matchingTextFiles}");
-
-        report.AppendLine();
+        report.AppendLine($"Text files inspected: {inspected}");
+        report.AppendLine($"Files with relevant references: {matching}");
         report.AppendLine("SCAN COMPLETE.");
-
-        if (candidateFiles.Count == 0)
-        {
-            report.AppendLine(
-                "No candidate paths were found. This archive may not expose directory listings for the scanned folders.");
-        }
+        report.AppendLine(
+            "NOTE: This scan reads definitions in def.scs. Referenced DDS/TOBJ files may be stored in another SCS archive.");
 
         return report.ToString();
     }
@@ -726,10 +783,7 @@ public class MainActivity : Activity
             _environment == null)
         {
             Toast.MakeText(
-                this,
-                "Load the model and textures first.",
-                ToastLength.Short)!.Show();
-
+                this, "Load base.scs first.", ToastLength.Short)!.Show();
             return;
         }
 
@@ -744,7 +798,6 @@ public class MainActivity : Activity
             _environment));
 
         _glView.RenderMode = Rendermode.Continuously;
-
         SetContentView(_glView);
     }
 
@@ -753,18 +806,15 @@ public class MainActivity : Activity
         if (string.IsNullOrWhiteSpace(_diagnosticReport))
             return;
 
-        var clipboard =
-            (ClipboardManager)GetSystemService(
-                ClipboardService)!;
+        var clipboard = (ClipboardManager)GetSystemService(
+            ClipboardService)!;
 
         clipboard.PrimaryClip = ClipData.NewPlainText(
-            "ETS2 DAF XF full material and paintjob report",
+            "ETS2 DAF XF material and paintjob report",
             _diagnosticReport);
 
         Toast.MakeText(
-            this,
-            "Full report copied!",
-            ToastLength.Short)!.Show();
+            this, "Full report copied!", ToastLength.Short)!.Show();
     }
 
     protected override void OnPause()
@@ -779,5 +829,3 @@ public class MainActivity : Activity
         _glView?.OnResume();
     }
 }
-
-      
