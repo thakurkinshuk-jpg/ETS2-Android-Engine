@@ -194,10 +194,10 @@ public sealed class DafXfRenderer :
 
                 if (vertex.TextureCoordinates.Length > 0)
                 {
-                    // Test UV2 for the truck-paint material.
-                    int uvChannel = piece.MaterialIndex == 7 &&
-                                    vertex.TextureCoordinates.Length > 2
-                                    ? 2 : 0;
+                    // Base texture uses primary UV0.
+                    // Alternate UV1 is reserved for a separate
+                    // paintjob texture in future implementation.
+                    int uvChannel = 0;
 
                     var uv = vertex.TextureCoordinates[uvChannel];
 
